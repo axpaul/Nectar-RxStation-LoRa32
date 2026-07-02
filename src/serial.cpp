@@ -56,7 +56,7 @@ uint16_t calculate_crc16(const uint8_t *data, size_t len) {
  * Un caractère '\n' est ajouté en fin de trame pour en faciliter l'enregistrement.
  */
 void sendNectarFrame(uint8_t ssid_type, uint8_t ssid_num, uint8_t apid, const uint8_t *payload, size_t len, int8_t rssi, int8_t snr) {
-    // 1. Limiter la longueur brute de LoRa à 250 octets max pour laisser de la place au RSSI (1B), SNR (1B) et Timestamp (4B)
+    // 1. Limiter la longueur brute de LoRa à 250 octets max pour laisser de la place
     if (len > 250) {
         len = 250;
     }
@@ -65,45 +65,81 @@ void sendNectarFrame(uint8_t ssid_type, uint8_t ssid_num, uint8_t apid, const ui
     uint16_t ssid = ((ssid_type & 0x03) << 8) | ssid_num;
     uint16_t id_mission = (ssid << 6) | (apid & 0x3F);
 
-    // 3. Préparer le Header NectarMC (4 octets)
-    // La taille de la payload transmise en série est la longueur brute LoRa
-    uint8_t header[4];
-    header[0] = NECTAR_MAGIC;
-    header[1] = id_mission & 0xFF;              // Encodage en Little-Endian (partie basse)
-    header[2] = (id_mission >> 8) & 0xFF;       // Encodage en Little-Endian (partie haute)
-    header[3] = (uint8_t)(len & 0xFF);          // Taille de la payload série brute (données utiles LoRa)
-
-    // 4. Assembler le header, le payload LoRa, les métriques RSSI/SNR et le Timestamp dans la trame
     uint8_t frame[275];
-    memcpy(frame, header, 4);
-    if (len > 0 && payload != nullptr) {
-        memcpy(frame + 4, payload, len);
+    size_t frameIndex = 0;
+
+    // 3. Assembler le buffer série selon le format configuré
+    if (activeConfig.activeFrameFormat == 1) {
+        // --- FORMAT AVEC GSFLAG (Dynamique avec Timestamp) ---
+        // Header (5 octets) : MAGIC | Id_mission (2B) | gs_flag (1B) | payload_size (1B)
+        frame[0] = NECTAR_MAGIC;
+        frame[1] = id_mission & 0xFF;
+        frame[2] = (id_mission >> 8) & 0xFF;
+        
+        // gs_flag = 0x3F (RSSI + SNR + Timestamp activés par la station sol)
+        uint8_t gs_flag = 0x3F;
+        frame[3] = gs_flag;
+        frame[4] = (uint8_t)(len & 0xFF);
+        frameIndex = 5;
+
+        // Payload LoRa
+        if (len > 0 && payload != nullptr) {
+            memcpy(frame + frameIndex, payload, len);
+        }
+        frameIndex += len;
+
+        // Footer conditionnel
+        if (gs_flag & 0x01) {
+            frame[frameIndex++] = (uint8_t)rssi;
+        }
+        if (gs_flag & 0x02) {
+            frame[frameIndex++] = (uint8_t)snr;
+        }
+
+        // Ajout conditionnel du Timestamp Unix Epoch (4 octets - Little-Endian)
+        if (gs_flag & 0x3C) {
+            uint32_t epoch = rtc.getEpoch();
+            frame[frameIndex++] = epoch & 0xFF;
+            frame[frameIndex++] = (epoch >> 8) & 0xFF;
+            frame[frameIndex++] = (epoch >> 16) & 0xFF;
+            frame[frameIndex++] = (epoch >> 24) & 0xFF;
+        }
+
+        // Calcul du CRC16 sur l'ensemble [Header + Payload + Footer + (Timestamp si présent)]
+        uint16_t crc = calculate_crc16(frame, frameIndex);
+        frame[frameIndex++] = crc & 0xFF;
+        frame[frameIndex++] = (crc >> 8) & 0xFF;
+        frame[frameIndex++] = '\n';
     }
-    frame[4 + len] = (uint8_t)rssi;
-    frame[4 + len + 1] = (uint8_t)snr;
+    else {
+        // --- FORMAT SANS GSFLAG (Original - v1.3.1 / master) ---
+        // Header (4 octets) : MAGIC | Id_mission (2B) | payload_size (1B)
+        frame[0] = NECTAR_MAGIC;
+        frame[1] = id_mission & 0xFF;
+        frame[2] = (id_mission >> 8) & 0xFF;
+        frame[3] = (uint8_t)(len & 0xFF);
+        frameIndex = 4;
 
-    // Ajout du Timestamp Unix Epoch (4 octets - Little-Endian)
-    uint32_t epoch = rtc.getEpoch();
-    frame[4 + len + 2] = epoch & 0xFF;
-    frame[4 + len + 3] = (epoch >> 8) & 0xFF;
-    frame[4 + len + 4] = (epoch >> 16) & 0xFF;
-    frame[4 + len + 5] = (epoch >> 24) & 0xFF;
+        // Payload LoRa
+        if (len > 0 && payload != nullptr) {
+            memcpy(frame + frameIndex, payload, len);
+        }
+        frameIndex += len;
 
-    // 5. Calculer le CRC16 sur l'ensemble [Header + Payload LoRa + RSSI + SNR + Timestamp]
-    uint16_t crc = calculate_crc16(frame, 4 + len + 2 + 4);
+        // CRC16 sur [Header + Payload] uniquement (sans metadata)
+        uint16_t crc = calculate_crc16(frame, frameIndex);
+        frame[frameIndex++] = crc & 0xFF;
+        frame[frameIndex++] = (crc >> 8) & 0xFF;
+        frame[frameIndex++] = '\n';
+    }
 
-    // 6. Écrire le CRC16 et le saut de ligne directement dans le buffer
-    frame[4 + len + 6] = crc & 0xFF;              // CRC16 Little-Endian (partie basse)
-    frame[4 + len + 7] = (crc >> 8) & 0xFF;       // CRC16 Little-Endian (partie haute)
-    frame[4 + len + 8] = '\n';                    // Saut de ligne
-
-    // 7. Émettre la trame complète en un seul appel (Série USB)
-    Serial.write(frame, 4 + len + 9);
+    // 4. Émettre la trame complète en un seul appel (Série USB)
+    Serial.write(frame, frameIndex);
 
 #if ENABLE_BLUETOOTH
-    // 8. Émettre également en Bluetooth si un client est connecté.
+    // 5. Émettre également en Bluetooth si un client est connecté.
     if (SerialBT.connected()) {
-        SerialBT.write(frame, 4 + len + 9);
+        SerialBT.write(frame, frameIndex);
     }
 #endif
 }

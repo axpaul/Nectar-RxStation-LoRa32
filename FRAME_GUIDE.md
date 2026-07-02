@@ -50,49 +50,87 @@ Si le CRC matériel est désactivé (`AT+CRC=0`), la station s'attend à ce que 
 
 ## 💻 2. Format de la Trame Série NectarMC (Série USB & Bluetooth)
 
-Lorsque la station sol a validé une trame radio (Option A ou B), elle l'encapsule dans une trame binaire conforme au protocole NectarMC pour l'envoyer au PC sur le port série USB ou Bluetooth.
-* **Taille totale** : $13 + N$ octets.
+Lorsque la station sol a validé une trame radio, elle l'encapsule dans une trame binaire conforme au protocole NectarMC pour l'envoyer au PC sur le port série USB ou Bluetooth. Deux formats de trame série sont supportés et configurables à chaud sur le récepteur :
 
-> [!WARNING]
-> **Évolution importante du format en fonction des versions :**
-> La structure de la trame série transmise au PC (USB/Bluetooth) a évolué.
-> * À partir de la version **v1.4.0**, la trame série fait **$13 + N$ octets** car elle inclut un horodatage absolu de 4 octets (`Timestamp` Epoch Unix) inséré juste après le bit de `SNR` et avant le `CRC16`.
-> * Sur les versions antérieures (**v1.3.1 et inférieures**), la trame faisait **$9 + N$ octets** et ne comportait aucun horodatage (les octets après le `SNR` étaient directement les 2 octets du `CRC16`).
+---
+
+### A. Format avec GSFLAG (v1.5.0 / FrameFormatWithGsFlag - Par défaut)
+Ce format propose un en-tête étendu intégrant l'octet **`gs_flag`** (Ground Station Flag). Le footer s'adapte dynamiquement pour inclure le RSSI et le SNR s'ils sont demandés par le drapeau, suivis d'un **Timestamp Epoch Unix de 4 octets** fixe de manière standard.
+* **Taille totale** : $12 + N + M$ octets (où $M$ est le nombre de métadonnées présentes : 0, 1 ou 2 octets).
 
 ```
-┌───────────────────────────────────────────┬───────────────────┬───────────────────────────────────────┬───────────────┐
-│                 HEADER                    │      PAYLOAD      │               METADATA                │     CONTROL   │
-├───────────────────────────────────────────┼───────────────────┼───────────────────────────────────────┼───────────────┤
-│   MAGIC     │  Id_mission  │ payload_size │      N data       │  RSSI   │   SNR   │     Timestamp     │     CRC16     │
-│   1 Byte    │   2 Bytes    │   1 Byte     │      bytes        │ 1 Byte  │ 1 Byte  │      4 Bytes      │    2 Bytes    │
-│    0xEB     │ (Little-End) │   (N bytes)  │                   │(int8_t) │(int8_t) │ (uint32_t Little-E)│ (Little-End)  │
-└─────────────┴──────────────┴──────────────┴───────────────────┴─────────┴─────────┴───────────────────┴───────────────┘
+┌───────────────────────────────────────────────────────────┬───────────────────┬───────────────────────────────────────┬───────────────┐
+│                          HEADER                           │      PAYLOAD      │               METADATA                │    CONTROL    │
+├─────────────┬──────────────┬──────────────┬───────────────┼───────────────────┼───────────┬───────────┬───────────────┼───────────────┤
+│   MAGIC     │  Id_mission  │   gs_flag    │ payload_size  │      N data       │   RSSI    │    SNR    │   Timestamp   │     CRC16     │
+│   1 Byte    │   2 Bytes    │    1 Byte    │    1 Byte     │      bytes        │  (Option) │  (Option) │    4 Bytes    │    2 Bytes    │
+│    0xEB     │ (Little-End) │   (Bitmask)  │   (N bytes)   │                   │  1 Byte   │  1 Byte   │ (uint32_t L-E)│ (Little-End)  │
+└─────────────┴──────────────┴──────────────┴───────────────┴───────────────────┴───────────┴───────────┴───────────────┴───────────────┘
 ```
 
-### Description des octets de la trame série
+#### Fonctionnement du Ground Station Flag (`gs_flag`) :
+L'octet `gs_flag` (Octet 3) est un masque de bits utilisé pour activer ou désactiver l'envoi de métriques spécifiques :
+```
+bit7    bit6    bit5    bit4    bit3    bit2    bit1    bit0
+ ─ Réservés ─   └───────── Timestamp ──────────┘   │       │
+                (Si l'un de ces bits est à 1)     │       └─ 1 = Inclure RSSI dans le footer
+                                                   └───────── 1 = Inclure SNR dans le footer
+```
 
+* **RSSI** (Octet 5+N si présent) : Présent uniquement si `(gs_flag & 0x01) == 1`.
+* **SNR** (Octet 5+N+$hasRssi$ si présent) : Présent uniquement si `(gs_flag & 0x02) == 2`.
+* **Timestamp** (4 octets si présent) : Présent uniquement si `(gs_flag & 0x3C) != 0` (les bits 2 à 5 décrivent sa présence).
+* **Par défaut sur Nectar RX Station** : Le `gs_flag` est fixé à `0x3F` (tous les bits de RSSI, SNR et Timestamp actifs) afin d'inclure systématiquement l'ensemble de ces informations.
+
+#### Description détaillée des octets :
 | Position | Type | Nom du Champ | Description |
 | :--- | :--- | :--- | :--- |
-| **Octet 0** | `uint8_t` | `MAGIC` | Marqueur de synchronisation de début de trame. Toujours égal à `0xEB`. |
-| **Octets 1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission codé en Little-Endian. Regroupe :<br>- Le type de tracker (`SSID_TYPE`, bits 15-14)<br>- Le numéro du tracker (`SSID_NUM`, bits 13-6)<br>- L'identifiant de paquet (`APID`, bits 5-0) |
-| **Octet 3** | `uint8_t` | `payload_size` | Longueur $N$ de la charge utile LoRa brute en octets (exclut les CRC radio). |
-| **Octets 4 à 3+N** | `uint8_t[]` | `Payload` | Données utiles brutes provenant du tracker LoRa ($N$ octets). |
-| **Octet 4+N** | `int8_t` | `RSSI` | Niveau de puissance du signal reçu en dBm. Entier signé (ex: `-85` dBm). |
-| **Octet 5+N** | `int8_t` | `SNR` | Rapport signal/bruit multiplié par 4 pour conserver une résolution de 0.25 dB (ex: `38` pour 9.5 dB). |
-| **Octets 6+N à 9+N** | `uint32_t` | `Timestamp` | Horodatage Unix Epoch (secondes) codé en Little-Endian. Récupéré depuis l'horloge RTC de la station. |
-| **Octets 10+N à 11+N** | `uint16_t` | `CRC16` | Somme de contrôle logicielle de validation (CCITT 0x1021, initialisé à 0xFFFF, Little-Endian) calculée sur l'ensemble de la trame série (du Magic `0xEB` jusqu'au Timestamp inclus). |
-| **Octet 12+N** | `char` | `Newline` | Caractère retour à la ligne `\n` (`0x0A`) facilitant la détection de fin et la journalisation. |
+| **Octet 0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
+| **Octets 1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission Little-Endian. Regroupe SSID_TYPE (bits 15-14), SSID_NUM (bits 13-6) et APID (bits 5-0). |
+| **Octet 3** | `uint8_t` | `gs_flag` | Masque de bits indiquant la présence de RSSI (bit 0), SNR (bit 1) et Timestamp (bits 2 à 5) dans le footer. |
+| **Octet 4** | `uint8_t` | `payload_size` | Longueur $N$ de la charge utile LoRa brute. |
+| **Octets 5 à 4+N** | `uint8_t[]` | `Payload` | Données brutes LoRa ($N$ octets). |
+| **Octets facultatifs** | `int8_t` | `RSSI` / `SNR` | En fonction de `gs_flag` (0, 1 ou 2 octets insérés après la payload). |
+| **4 octets suivants** | `uint32_t` | `Timestamp` | (Optionnel) Horodatage Unix Epoch (secondes) Little-Endian issu de la RTC de la station (présent si `gs_flag & 0x3C` est non-nul). |
+| **2 octets suivants** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian calculé sur toute la trame (du Magic `0xEB` jusqu'aux métadonnées incluses). |
+| **Dernier octet** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |
+
+---
+
+### B. Format sans GSFLAG (v1.3.1 / master)
+Ce format binaire minimaliste n'inclut aucune métadonnée réseau (RSSI, SNR) ni d'horodatage. Il est idéal pour minimiser le traitement et les transferts série.
+* **Taille totale** : $7 + N$ octets.
+
+```
+┌───────────────────────────────────────────┬───────────────────┬───────────────┐
+│                  HEADER                   │      PAYLOAD      │    CONTROL    │
+├───────────────────────────────────────────┼───────────────────┼───────────────┤
+│   MAGIC     │  Id_mission  │ payload_size │      N data       │     CRC16     │
+│   1 Byte    │   2 Bytes    │   1 Byte     │      bytes        │    2 Bytes    │
+│    0xEB     │ (Little-End) │   (N bytes)  │                   │ (Little-End)  │
+└─────────────┴──────────────┴──────────────┴───────────────────┴───────────────┘
+```
+
+#### Description détaillée des octets :
+| Position | Type | Nom du Champ | Description |
+| :--- | :--- | :--- | :--- |
+| **Octet 0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
+| **Octets 1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission Little-Endian. Regroupe SSID_TYPE (bits 15-14), SSID_NUM (bits 13-6) et APID (bits 5-0). |
+| **Octet 3** | `uint8_t` | `payload_size` | Longueur $N$ de la charge utile LoRa brute. |
+| **Octets 4 à 3+N** | `uint8_t[]` | `Payload` | Données brutes LoRa ($N$ octets). |
+| **Octets 4+N à 5+N** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian calculé sur les octets 0 à `3+N` (Header + Payload). |
+| **Octet 6+N** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |
 
 ---
 
 ## 📈 Historique et Évolution des Versions
 
-Pour s'assurer que vos parseurs et décodeurs côté PC (sur NectarMC ou votre propre Dashboard) fonctionnent correctement, voici le récapitulatif des versions de la station et l'impact sur le format des trames :
+Pour s'assurer que vos parseurs et décodeurs côté PC fonctionnent correctement, voici le récapitulatif des versions de la station et l'impact sur le format des trames :
 
 | Version | Taille Trame Série | Format de Trame Série | Nouveautés Majeures |
 | :---: | :---: | :--- | :--- |
-| **v1.4.0** <br>*(Courante)* | **$13 + N$ octets** | `MAGIC` (1B) + `Id_mission` (2B) + `Size` (1B) + `Payload` (NB) + `RSSI` (1B) + `SNR` (1B) + **`Timestamp` (4B)** + `CRC16` (2B) + `\n` (1B) | - Intégration du **Timestamp RTC** (Epoch Unix) de 4 octets.<br>- Ajout des commandes `AT+TIME` et `AT+TIME?` pour synchroniser l'horloge RTC.<br>- Commande `AT+CRC=<enable>[,mode]` pour configurer le type de CRC (CCITT/IBM).<br>- Vérification automatique du CRC logiciel par l'ESP32 en mode `AT+CRC=0`. |
-| **v1.3.1** | **$9 + N$ octets** | `MAGIC` (1B) + `Id_mission` (2B) + `Size` (1B) + `Payload` (NB) + `RSSI` (1B) + `SNR` (1B) + `CRC16` (2B) + `\n` (1B) | - Version originale compatible NectarMC.<br>- CRC matériel obligatoire par défaut sur la liaison radio LoRa.<br>- Pas de timestamp de réception (l'heure était extrapolée sur le PC). |
+| **v1.5.0 (GSFLAG)** | **$12 + N + M$ octets** | `MAGIC` (1B) + `Id_mission` (2B) + `gs_flag` (1B) + `Size` (1B) + `Payload` (NB) + `Metadata` (MB) + **`Timestamp` (4B)** + `CRC16` (2B) + `\n` (1B) | - Intégration du **Ground Station Flag** (`gs_flag`) pour des métadonnées dynamiques. <br>- Choix des paramètres RSSI/SNR conditionnés par bitmask. <br>- Présence fixe d'un **Timestamp RTC** (Epoch Unix) de 4 octets. |
+| **v1.3.1** | **$7 + N$ octets** | `MAGIC` (1B) + `Id_mission` (2B) + `Size` (1B) + `Payload` (NB) + `CRC16` (2B) + `\n` (1B) | - Version originale compatible NectarMC.<br>- Aucune métadonnée insérée (pas de RSSI, SNR ni de timestamp). |
 
 ---
 
