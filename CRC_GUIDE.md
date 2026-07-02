@@ -39,7 +39,7 @@ C'est l'option standard configurée au démarrage de la station.
 *   **Fonctionnement** : 
     * Si le CRC matériel est désactivé (`AT+CRC=0`), la puce radio SX1276 n'effectue aucun test en silicium et accepte tous les paquets reçus. 
     * Pour sécuriser la transmission, le code de votre émetteur (tracker) doit calculer une somme de contrôle CRC16 (polynôme CCITT) et l'insérer en queue du paquet radio LoRa.
-    * À la réception, l'ESP32 de la station sol lit les données et effectue le calcul du CRC16 logiciel en C++ (voir [radio.cpp](./src/radio.cpp#L295-L318)). 
+    * À la réception, l'ESP32 de la station sol lit les données et effectue le calcul du CRC16 logiciel en C++ (voir [radio.cpp](./src/radio.cpp#L145-L173)). 
         * *Si le CRC logiciel est valide* : L'ESP32 valide le paquet, retire les 2 octets du CRC logiciel de la charge utile (pour que la charge utile de données soit identique au mode matériel pour le PC), et transmet le reste.
         * *Si le CRC logiciel est invalide* : Il incrémente le compteur d'erreurs (`errCount`), met à jour l'afficheur OLED avec le message `"CRC Error (Soft)"` et rejette silencieusement le paquet.
 *   **Pourquoi faire cela ?** Bien que la station sol filtre désormais les trames corrompues dans les deux modes (matériel et logiciel) pour éviter d'envoyer des données erronées au PC, utiliser un CRC logiciel LoRa permet à l'émetteur de conserver un contrôle applicatif complet sur son intégrité ou de contourner les limitations de certaines puces radio.

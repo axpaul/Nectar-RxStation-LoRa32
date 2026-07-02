@@ -106,10 +106,10 @@ Pour la liste complète des commandes, leurs paramètres autorisés et le format
 ## Structure des logs (Carte SD)
 
 Les données sont enregistrées dans un fichier CSV avec la structure suivante :
-`Timestamp,RSSI,SNR,SSID,APID,RawFrame`
+`Index,Timestamp,Length,RSSI,SNR,SSID,APID,RawFrame`
 
 Exemple de ligne de log :
-`00:05:42,-85.00,8.50,FX99,7,EBC7181401020304`
+`1,00:05:42,8,-85.00,8.50,FX99,7,EBC7181401020304`
 
 ---
 
