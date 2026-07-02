@@ -94,12 +94,15 @@ extern BluetoothSerial SerialBT;
 // ============================================================================
 // Structures et variables globales
 // ============================================================================
+#define DEFAULT_FRAME_FORMAT        1 // 0: Sans GSFLAG (sans metadata), 1: Avec GSFLAG (metadata dynamiques)
+
 struct LoRaConfig {
   float frequency;
   uint8_t spreadingFactor;
   float bandwidth;
   bool crcEnable;
   bool crcMode; // false = CCITT, true = IBM
+  uint8_t activeFrameFormat; // Format de trame série vers le PC (0, 1 ou 2)
 };
 
 // Structure encapsulant un paquet reçu et ses métadonnées pour transfert inter-cœur

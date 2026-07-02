@@ -74,6 +74,8 @@ const i18n = {
     at_desc_bw_set: "Configurer la bande passante (kHz)",
     at_desc_crc_get: "Interroger le statut du CRC",
     at_desc_crc_set: "Configurer le CRC (0=OFF, 1=ON [,mode])",
+    at_desc_fmt_get: "Interroger le format de la trame série active",
+    at_desc_fmt_set: "Configurer le format de trame (0=Original, 1=v1.4.0, 2=GSFLAG)",
     at_desc_time_get: "Interroger l'heure RTC de la station",
     at_desc_time_set: "Configurer l'heure RTC (Unix Epoch)",
     at_desc_rssi_get: "RSSI du dernier paquet reçu",
@@ -226,6 +228,8 @@ const i18n = {
     at_desc_bw_set: "Set the bandwidth (kHz)",
     at_desc_crc_get: "Query CRC status",
     at_desc_crc_set: "Set CRC (0=OFF, 1=ON [,mode])",
+    at_desc_fmt_get: "Query the active serial frame format",
+    at_desc_fmt_set: "Set the serial frame format (0=Original, 1=v1.4.0, 2=GSFLAG)",
     at_desc_time_get: "Query the station's RTC time",
     at_desc_time_set: "Set the RTC time (Unix Epoch)",
     at_desc_rssi_get: "RSSI of the last received packet",
@@ -737,14 +741,28 @@ function parseRxBuffer() {
   while (processing && rxBuffer.length > 0) {
     // Si c'est le début d'une trame binaire NectarMC (NECTAR_MAGIC = 0xEB)
     if (rxBuffer[0] === 0xEB) {
-      if (rxBuffer.length < 4) {
-        processing = false; // Attente d'octets supplémentaires
-        break;
-      }
+      const fwVersion = selectFwVersion ? selectFwVersion.value : 'gs_flag';
+      let totalFrameSize = 0;
       
-      const payloadSize = rxBuffer[3]; // Taille brute des données de la payload LoRa
-      const fwVersion = selectFwVersion ? selectFwVersion.value : '1.4.0';
-      const totalFrameSize = (fwVersion === '1.3.1') ? (4 + payloadSize + 2 + 2 + 1) : (4 + payloadSize + 2 + 4 + 2 + 1);
+      if (fwVersion === 'gs_flag') {
+        if (rxBuffer.length < 5) {
+          processing = false; // Attente d'octets supplémentaires pour lire la taille
+          break;
+        }
+        const gsFlag = rxBuffer[3];
+        const payloadSize = rxBuffer[4];
+        const hasRssi = (gsFlag & 0x01) ? 1 : 0;
+        const hasSnr = (gsFlag & 0x02) ? 1 : 0;
+        const hasTimestamp = (gsFlag & 0x3C) ? 4 : 0;
+        totalFrameSize = 5 + payloadSize + hasRssi + hasSnr + hasTimestamp + 2 + 1;
+      } else { // 1.3.1 (Original sans GSFLAG)
+        if (rxBuffer.length < 4) {
+          processing = false;
+          break;
+        }
+        const payloadSize = rxBuffer[3];
+        totalFrameSize = 4 + payloadSize + 2 + 1; // Header(4) + Payload(N) + CRC16(2) + \n(1)
+      }
       
       if (rxBuffer.length < totalFrameSize) {
         processing = false; // La trame n'est pas encore complète
@@ -840,6 +858,8 @@ function renderAtHelperList() {
     { cmd: "AT+BW=", descKey: "at_desc_bw_set" },
     { cmd: "AT+CRC?", descKey: "at_desc_crc_get" },
     { cmd: "AT+CRC=", descKey: "at_desc_crc_set" },
+    { cmd: "AT+FMT?", descKey: "at_desc_fmt_get" },
+    { cmd: "AT+FMT=", descKey: "at_desc_fmt_set" },
     { cmd: "AT+TIME?", descKey: "at_desc_time_get" },
     { cmd: "AT+TIME=", descKey: "at_desc_time_set" },
     { cmd: "AT+RSSI?", descKey: "at_desc_rssi_get" },
@@ -924,26 +944,52 @@ function calculateCRC16(data) {
   return crc;
 }
 
-// Décodage des trames NectarMC
 function decodeNectarFrame(frame) {
-  const payloadSize = frame[3]; // Taille brute de la payload LoRa
-  const fwVersion = selectFwVersion ? selectFwVersion.value : '1.4.0';
+  const fwVersion = selectFwVersion ? selectFwVersion.value : 'gs_flag';
+  let payloadSize = 0;
+  let payloadOffset = 4;
   let epoch = 0;
   let crc = 0;
   let calculatedCrc = 0;
+  let rssi = 0;
+  let snr = 0;
+  let gsFlag = 0;
 
-  if (fwVersion === '1.3.1') {
-    crc = (frame[4 + payloadSize + 3] << 8) | frame[4 + payloadSize + 2];
-    calculatedCrc = calculateCRC16(frame.slice(0, 4 + payloadSize + 2));
-  } else {
-    // Le Timestamp (Unix Epoch) est après le SNR (4 octets, uint32_t Little-Endian)
-    const tsOffset = 4 + payloadSize + 2;
-    epoch = (frame[tsOffset + 3] << 24 >>> 0) +
-            (frame[tsOffset + 2] << 16) +
-            (frame[tsOffset + 1] << 8) +
-            frame[tsOffset];
-    crc = (frame[4 + payloadSize + 7] << 8) | frame[4 + payloadSize + 6];
-    calculatedCrc = calculateCRC16(frame.slice(0, 4 + payloadSize + 6));
+  if (fwVersion === 'gs_flag') {
+    payloadOffset = 5;
+    gsFlag = frame[3];
+    payloadSize = frame[4];
+    
+    let footerOffset = 5 + payloadSize;
+    if (gsFlag & 0x01) {
+      const rawRssi = frame[footerOffset++];
+      rssi = rawRssi >= 128 ? rawRssi - 256 : rawRssi;
+    }
+    if (gsFlag & 0x02) {
+      const rawSnr = frame[footerOffset++];
+      const signedSnr = rawSnr >= 128 ? rawSnr - 256 : rawSnr;
+      snr = signedSnr / 4.0;
+    }
+    
+    // Lecture du Timestamp (4 octets Unix Epoch Little-Endian) si présent
+    if (gsFlag & 0x3C) {
+      epoch = (frame[footerOffset + 3] << 24 >>> 0) +
+              (frame[footerOffset + 2] << 16) +
+              (frame[footerOffset + 1] << 8) +
+              frame[footerOffset];
+      footerOffset += 4;
+    }
+    
+    crc = (frame[footerOffset + 1] << 8) | frame[footerOffset];
+    calculatedCrc = calculateCRC16(frame.slice(0, footerOffset));
+  } else { // 1.3.1 (Sans GSFLAG - v1.3.1 / master)
+    payloadSize = frame[3];
+    payloadOffset = 4;
+    rssi = 0;
+    snr = 0;
+    
+    crc = (frame[4 + payloadSize + 1] << 8) | frame[4 + payloadSize];
+    calculatedCrc = calculateCRC16(frame.slice(0, 4 + payloadSize));
   }
 
   // Vérification du CRC
@@ -966,16 +1012,9 @@ function decodeNectarFrame(frame) {
   const ssidType = (ssid >> 8) & 0x03;
   const ssidNum = ssid & 0xFF;
   
-  const payload = frame.slice(4, 4 + payloadSize); // Les données utiles LoRa brutes
+  const payload = frame.slice(payloadOffset, payloadOffset + payloadSize); // Les données utiles LoRa brutes
   
-  // RSSI et SNR sont après la payload (de taille payloadSize)
-  const rawRssi = frame[4 + payloadSize];
-  const rawSnr = frame[4 + payloadSize + 1];
-  const rssi = rawRssi >= 128 ? rawRssi - 256 : rawRssi;
-  
-  // Le SNR est multiplié par 4 à l'envoi pour coder au 0.25 dB de précision
-  const signedSnr = rawSnr >= 128 ? rawSnr - 256 : rawSnr;
-  const snr = signedSnr / 4.0;
+
 
   // ... (ssidPrefix extraction code is identical) ...
   let ssidPrefix = 'OTHER';
@@ -993,14 +1032,7 @@ function decodeNectarFrame(frame) {
   
   const trackerName = `${ssidPrefix}${ssidNum}`;
   
-  // Formater l'horodatage à partir de l'Epoch reçu de l'ESP32
-  let timestamp;
-  if (epoch > 100000000) {
-    timestamp = new Date(epoch * 1000).toLocaleTimeString();
-  } else {
-    // Fallback à l'heure du navigateur si la RTC n'a pas été initialisée (Epoch 0 ou valeur invalide)
-    timestamp = new Date().toLocaleTimeString();
-  }
+  const timestamp = (epoch > 100000000) ? new Date(epoch * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
   
   const crcHex = '0x' + crc.toString(16).toUpperCase().padStart(4, '0');
 

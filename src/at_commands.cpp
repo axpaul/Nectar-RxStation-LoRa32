@@ -220,6 +220,20 @@ void handleConfigCommand(const char* cmd, Stream& responseStream, SX1276 *radio)
     responseStream.println("OK");
   }
 
+  // AT+FMT=<0|1> ou AT+FMT?
+  else if (strncmp(cmd, "AT+FMT=", 7) == 0) {
+    int val = atoi(cmd + 7);
+    if (val == 0 || val == 1) {
+      activeConfig.activeFrameFormat = val;
+      responseStream.println("OK");
+    } else {
+      responseStream.println("ERROR: Format must be 0 (No GSFLAG) or 1 (With GSFLAG)");
+    }
+  } else if (strcmp(cmd, "AT+FMT?") == 0) {
+    responseStream.printf("+FMT: %d\n", activeConfig.activeFrameFormat);
+    responseStream.println("OK");
+  }
+
   // AT+CFG ou AT+STATUS
   else if (strcmp(cmd, "AT+CFG") == 0 || strcmp(cmd, "AT+STATUS") == 0) {
     responseStream.println("--- Nectar RxStation Configuration ---");
@@ -234,6 +248,10 @@ void handleConfigCommand(const char* cmd, Stream& responseStream, SX1276 *radio)
     } else {
       responseStream.println("Hardware CRC      : OFF");
     }
+    const char* fmtStr = "Unknown";
+    if (activeConfig.activeFrameFormat == 0) fmtStr = "0 (Sans GSFLAG - Sans Metadata)";
+    else if (activeConfig.activeFrameFormat == 1) fmtStr = "1 (Avec GSFLAG - Metadata dynamiques)";
+    responseStream.printf("Serial Frame Format: %s\n", fmtStr);
     responseStream.printf("SD Card Connected : %s\n", *SDCard ? "Yes" : "No");
 #if ENABLE_BLUETOOTH
     responseStream.printf("Bluetooth Client  : %s\n", SerialBT.connected() ? "Connected" : "Disconnected");
@@ -279,6 +297,8 @@ void handleConfigCommand(const char* cmd, Stream& responseStream, SX1276 *radio)
     responseStream.println("AT+BW?         : Get active Bandwidth");
     responseStream.println("AT+CRC=<0|1>   : Set Hardware CRC (0=OFF, 1=ON)");
     responseStream.println("AT+CRC?        : Get Hardware CRC status");
+    responseStream.println("AT+FMT=<0|1>   : Set output format (0=Sans GSFLAG, 1=Avec GSFLAG)");
+    responseStream.println("AT+FMT?        : Get active output format");
     responseStream.println("AT+TIME=<epoch>: Set RTC time (Unix Epoch)");
     responseStream.println("AT+TIME?       : Get RTC time (Unix Epoch)");
     responseStream.println("AT+RSSI?       : Get last received packet RSSI");

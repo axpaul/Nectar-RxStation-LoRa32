@@ -95,6 +95,17 @@ Les commandes peuvent être envoyées via la **liaison série USB** (115200 baud
     *   `paramètre 2` (optionnel) : `0` = mode CCITT (par défaut), `1` = mode IBM.
 *   **Format de réponse** : `OK` ou `ERROR`.
 
+### `AT+FMT?`
+*   **Rôle** : Interroge le format de trame série actif pour la transmission vers le PC.
+*   **Format de réponse** : `+FMT: <format>` (0 = Sans GSFLAG, 1 = Avec GSFLAG) suivi de `OK`.
+
+### `AT+FMT=<format>`
+*   **Rôle** : Modifie le format de trame série émis en direct sur USB et Bluetooth.
+*   **Arguments** :
+    *   `0` : **Sans GSFLAG (Original - v1.3.1)** -> MAGIC (1B) | Id_mission (2B) | Size (1B) | Payload (NB) | CRC16 (2B) | \n.
+    *   `1` : **Avec GSFLAG (Dynamique - v1.5.0)** -> MAGIC (1B) | Id_mission (2B) | gs_flag (1B) | Size (1B) | Payload (NB) | RSSI (1B, option) | SNR (1B, option) | CRC16 (2B) | \n.
+*   **Format de réponse** : `OK` ou `ERROR: Format must be 0 (No GSFLAG) or 1 (With GSFLAG)`.
+
 ---
 
 ## 3. Résilience et Stockage
