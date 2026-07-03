@@ -84,7 +84,7 @@ Pour garantir la fiabilité de la transmission des données de la fusée jusqu'�
 Pour une explication détaillée de ces deux niveaux de sécurité et un guide pas-à-pas idéal pour les débutants :
 👉 **[Consulter le Guide complet sur les CRC](./CRC_GUIDE.md)**
 
-### 🛡️ Gestion des Interruptions LoRa & Watchdog Failsafe
+### Gestion des Interruptions LoRa & Watchdog Failsafe
 
 Les firmwares de l'écosystème exploitent les interruptions matérielles sur la broche **DIO0** du SX1276 (signalant la fin d'une réception RX ou d'une émission TX) à l'aide de sémaphores FreeRTOS configurés avec un timeout de **2 secondes**. Leurs comportements de secours (*failsafe*) sont optimisés pour leurs rôles respectifs :
 
