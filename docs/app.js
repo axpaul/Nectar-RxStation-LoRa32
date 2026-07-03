@@ -436,7 +436,7 @@ function setLanguage(lang) {
 }
 
 function updateFlashTexts() {
-  const fwVersion = selectFwVersion ? selectFwVersion.value : 'latest';
+  const fwVersion = selectFlashFwVersion ? selectFlashFwVersion.value : 'latest';
   const verStr = fwVersion === 'v1.3.1' ? 'v1.3.1' : 'v1.6.1';
   
   // Mettre à jour la description
@@ -498,7 +498,7 @@ const btnSend = document.getElementById('btn-send');
 // Flasher
 const btnFlash = document.getElementById('btn-flash');
 const selectBand = document.getElementById('select-band');
-const selectFwVersion = document.getElementById('select-fw-version');
+const selectFlashFwVersion = document.getElementById('select-flash-fw-version');
 const flashProgressContainer = document.getElementById('flash-progress-container');
 const flashProgressBar = document.getElementById('flash-progress-bar');
 const lblFlashStatus = document.getElementById('lbl-flash-status');
@@ -1667,7 +1667,7 @@ function exportTelemetryToCSV() {
 // ============================================================================
 async function flashFirmware() {
   const band = selectBand ? selectBand.value : '868';
-  const fwVersion = selectFwVersion ? selectFwVersion.value : 'latest';
+  const fwVersion = selectFlashFwVersion ? selectFlashFwVersion.value : 'latest';
   const binUrl = fwVersion === 'v1.3.1'
     ? `binaries/firmware_bluetooth_${band}_v1.3.1.bin`
     : `binaries/firmware_bluetooth_${band}.bin`;
@@ -1679,7 +1679,7 @@ async function flashFirmware() {
   
   setElementDisabled(btnFlash, true);
   setElementDisabled(selectBand, true);
-  setElementDisabled(selectFwVersion, true);
+  setElementDisabled(selectFlashFwVersion, true);
   if (flashProgressContainer) flashProgressContainer.classList.remove('hidden');
   if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_connecting');
   if (lblFlashPercent) lblFlashPercent.textContent = "0%";
@@ -1767,7 +1767,7 @@ async function flashFirmware() {
     }
     setElementDisabled(btnFlash, false);
     setElementDisabled(selectBand, false);
-    setElementDisabled(selectFwVersion, false);
+    setElementDisabled(selectFlashFwVersion, false);
   }
 }
 
@@ -1777,7 +1777,7 @@ async function flashFirmware() {
 if (btnConnect) btnConnect.addEventListener('click', connectSerial);
 if (btnDisconnect) btnDisconnect.addEventListener('click', disconnectSerial);
 if (btnFlash) btnFlash.addEventListener('click', flashFirmware);
-if (selectFwVersion) selectFwVersion.addEventListener('change', updateFlashTexts);
+if (selectFlashFwVersion) selectFlashFwVersion.addEventListener('change', updateFlashTexts);
 
 // Événements de la carte SD
 if (btnListSd) {
