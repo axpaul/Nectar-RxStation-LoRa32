@@ -40,5 +40,6 @@ AT+RESET            : Réinitialise aux paramètres d'usine par défaut et redé
 AT+RSSI?            : Renvoie le RSSI en dBm de la dernière trame reçue.
 AT+SNR?             : Renvoie le SNR en dB de la dernière trame reçue.
 AT+SIG?             : Renvoie simultanément le RSSI et le SNR du dernier paquet.
+AT+ERR?             : Renvoie le nombre cumulé de paquets rejetés/corrompus (ex: échec CRC).
 
 ================================================================================
