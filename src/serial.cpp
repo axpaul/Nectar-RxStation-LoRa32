@@ -1,11 +1,11 @@
 /**
  * @file serial.cpp
  * @brief Gestion de la liaison série USB et Bluetooth pour l'envoi des trames NectarMC.
- * @version 1.6.0
+ * @version 1.6.1
  * @author Paul Miailhe
  * @date 27/06/2026
  * 
- * Version 1.6.0 : Refactorisation multitâche dual-core (FreeRTOS) et écran OLED séparé.
+ * Version 1.6.1 : Refactorisation multitâche dual-core (FreeRTOS) et écran OLED séparé.
  */
 
 #include "header.h"

@@ -1,19 +1,19 @@
 /**
  * @file header.h
  * @brief Fichier d'en-tête global pour le projet Nectar-RxStation-LoRa32.
- * @version 1.6.0
+ * @version 1.6.1
  * @author Paul Miailhe
  * @date 27/06/2026
  * 
  * Contient les définitions des broches, les structures de données,
  * les paramètres de configuration native, et les déclarations de fonctions.
- * Version 1.6.0 : Refactorisation multitâche dual-core (FreeRTOS) et écran OLED séparé.
+ * Version 1.6.1 : Refactorisation multitâche dual-core (FreeRTOS) et écran OLED séparé.
  */
 
 #ifndef HEADER_H
 #define HEADER_H
 
-#define FW_VERSION "1.6.0"
+#define FW_VERSION "1.6.1"
 
 #include <Arduino.h>
 #include <SPI.h>
@@ -102,7 +102,7 @@ struct LoRaConfig {
   float bandwidth;
   bool crcEnable;
   bool crcMode; // false = CCITT, true = IBM
-  uint8_t activeFrameFormat; // Format de trame série vers le PC (0, 1 ou 2)
+  uint8_t activeFrameFormat; // Format de trame série vers le PC (0: Sans GSFLAG, 1: Avec GSFLAG)
 };
 
 // Structure encapsulant un paquet reçu et ses métadonnées pour transfert inter-cœur

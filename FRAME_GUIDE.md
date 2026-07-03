@@ -23,7 +23,7 @@ Le contrôle d'intégrité est pris en charge directement par le silicium de la 
 ```
 
 ### Option B : Format avec CRC logiciel (Si le CRC matériel est désactivé)
-Si le CRC matériel est désactivé (`AT+CRC=0`), la station s'attend à ce que l'émetteur calcule un CRC16 logiciel et l'ajoute à la fin de la charge utile LoRa. L'ESP32 de la station sol vérifiera ce CRC logiciel avant de valider le paquet (voir [radio.cpp](./src/radio.cpp#L295-L318)).
+Si le CRC matériel est désactivé (`AT+CRC=0`), la station s'attend à ce que l'émetteur calcule un CRC16 logiciel et l'ajoute à la fin de la charge utile LoRa. L'ESP32 de la station sol vérifiera ce CRC logiciel avant de valider le paquet (voir [radio.cpp](./src/radio.cpp#L145-L173)).
 * **Taille totale** : $5 + N$ octets.
 
 ```
@@ -78,7 +78,7 @@ bit7    bit6    bit5    bit4    bit3    bit2    bit1    bit0
 ```
 
 * **RSSI** (Octet 5+N si présent) : Présent uniquement si `(gs_flag & 0x01) == 1`.
-* **SNR** (Octet 5+N+$hasRssi$ si présent) : Présent uniquement si `(gs_flag & 0x02) == 2`.
+* **SNR** (Octet 5+N+$hasRssi$ si présent) : Présent uniquement si `(gs_flag & 0x02) == 2`. La valeur transmise est codée sous forme d'un entier signé sur 8 bits (`int8_t`) représentant le SNR physique en dB multiplié par 4 (exprimé en quarts de dB, ex: un SNR réel de 8.5 dB est transmis sous la forme d'un octet valant `34`).
 * **Timestamp** (4 octets si présent) : Présent uniquement si `(gs_flag & 0x3C) != 0` (les bits 2 à 5 décrivent sa présence).
 * **Par défaut sur Nectar RX Station** : Le `gs_flag` est fixé à `0x3F` (tous les bits de RSSI, SNR et Timestamp actifs) afin d'inclure systématiquement l'ensemble de ces informations.
 
@@ -90,7 +90,7 @@ bit7    bit6    bit5    bit4    bit3    bit2    bit1    bit0
 | **Octet 3** | `uint8_t` | `gs_flag` | Masque de bits indiquant la présence de RSSI (bit 0), SNR (bit 1) et Timestamp (bits 2 à 5) dans le footer. |
 | **Octet 4** | `uint8_t` | `payload_size` | Longueur $N$ de la charge utile LoRa brute. |
 | **Octets 5 à 4+N** | `uint8_t[]` | `Payload` | Données brutes LoRa ($N$ octets). |
-| **Octets facultatifs** | `int8_t` | `RSSI` / `SNR` | En fonction de `gs_flag` (0, 1 ou 2 octets insérés après la payload). |
+| **Octets facultatifs** | `int8_t` | `RSSI` / `SNR` | En fonction de `gs_flag` (0, 1 ou 2 octets insérés après la payload). Le RSSI est exprimé directement en dBm, le SNR est codé en quarts de dB (SNR réel en dB = valeur_transmise / 4). |
 | **4 octets suivants** | `uint32_t` | `Timestamp` | (Optionnel) Horodatage Unix Epoch (secondes) Little-Endian issu de la RTC de la station (présent si `gs_flag & 0x3C` est non-nul). |
 | **2 octets suivants** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian calculé sur toute la trame (du Magic `0xEB` jusqu'aux métadonnées incluses). |
 | **Dernier octet** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |

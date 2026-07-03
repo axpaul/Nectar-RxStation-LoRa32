@@ -179,7 +179,7 @@ def main():
     baud = 115200
     
     print("==========================================================")
-    print("      Simulateur de Trames WASP (v1.6.0 Multi-Tracker)")
+    print("      Simulateur de Trames WASP (v1.6.1 Multi-Tracker)")
     print("==========================================================")
     print(f"Connexion au port série : {port} à {baud} baud...")
     

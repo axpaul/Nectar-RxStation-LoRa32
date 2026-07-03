@@ -1,4 +1,4 @@
-# Guide Complet des Commandes AT — Nectar RX Station v1.6.0
+# Guide Complet des Commandes AT — Nectar RX Station v1.6.1
 
 Ce document détaille toutes les commandes AT disponibles sur le récepteur Nectar RX Station. 
 
@@ -40,7 +40,7 @@ Les commandes peuvent être envoyées via la **liaison série USB** (115200 baud
 
 ### `AT+INFO` ou `AT+VER`
 *   **Rôle** : Interroge l'identification de la station et sa version de firmware.
-*   **Format de réponse** : `+INFO: NECTAR RX STATION,FW=1.6.0,Band=<bande>` (où bande = `868` ou `433`).
+*   **Format de réponse** : `+INFO: NECTAR RX STATION,FW=1.6.1,Band=<bande>` (où bande = `868` or `433`).
 
 ### `AT+CFG` ou `AT+STATUS`
 *   **Rôle** : Affiche un rapport complet de diagnostic de l'état actuel de la station.
@@ -132,8 +132,8 @@ Les commandes peuvent être envoyées via la **liaison série USB** (115200 baud
 *   **Format de réponse** :
     ```
     +DUMP: START
-    Timestamp,RSSI,SNR,SSID,APID,RawFrame
-    00:05:42,-85.00,8.50,FX99,7,EBC7181401020304
+    Index,Timestamp,Length,RSSI,SNR,SSID,APID,RawFrame
+    1,00:05:42,8,-85.00,8.50,FX99,7,EBC7181401020304
     ...
     +DUMP: END
     OK
@@ -182,4 +182,4 @@ Lorsqu'une commande n'a pas pu être traitée, le récepteur retourne un message
 | `ERROR: Bandwidth must be greater than 0` | La bande passante doit être strictement positive. |
 | `ERROR: Command too long (max 63 chars)` | La ligne d'entrée dépasse la capacité sécurisée du buffer de traitement. |
 | `ERROR: File not found` | Le fichier demandé via `AT+DUMP` n'existe pas sur la carte SD. |
-| `ERROR: SD card not initialized` | Impossible d'accéder à la liste ou au fichier car la carte SD est absente ou défectueuse. |
+| `ERROR: SD card offline` | Impossible d'accéder à la liste ou au fichier car la carte SD est absente ou défectueuse. |

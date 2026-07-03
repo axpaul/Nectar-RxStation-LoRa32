@@ -57,7 +57,7 @@ const i18n = {
     badge_disconnected: "Déconnecté",
     badge_connected: "Connecté",
     header_title: "NECTAR RX STATION",
-    header_subtitle: "Web Control Center v1.6.0",
+    header_subtitle: "Web Control Center v1.6.1",
     conn_title: "🔌 Liaison Série USB",
     maintenance_title: "🛠️ Outils & Maintenance",
     sd_title: "📁 Journaux Carte SD",
@@ -133,11 +133,14 @@ const i18n = {
     stats_count: "Trames (Reçues / KO)",
     stats_crc_errors: "Erreurs CRC",
     flash_title: "⚡ Mise à Jour Firmware",
-    flash_desc: "Flashez directement la version <strong>v1.6.0</strong> depuis votre navigateur par port USB.",
+    flash_desc: "Flashez directement la version <strong>v1.6.1</strong> depuis votre navigateur par port USB.",
+    flash_version: "Version du Firmware :",
+    flash_version_latest: "Dernière version (v1.6.1)",
+    flash_version_131: "Version historique (v1.3.1)",
     flash_band: "Bande Radio native de la carte :",
     flash_band_868: "868 MHz (Europe)",
     flash_band_433: "433 MHz",
-    flash_btn_flash: "Flasher la carte (v1.6.0)",
+    flash_btn_flash: "Flasher la carte (v1.6.1)",
     flash_status_label: "Statut :",
     flash_status_waiting: "Attente...",
     trackers_title: "🛸 Émetteurs Détectés (Active Trackers)",
@@ -211,7 +214,7 @@ const i18n = {
     badge_disconnected: "Disconnected",
     badge_connected: "Connected",
     header_title: "NECTAR RX STATION",
-    header_subtitle: "Web Control Center v1.6.0",
+    header_subtitle: "Web Control Center v1.6.1",
     conn_title: "🔌 USB Serial Link",
     maintenance_title: "🛠️ Tools & Maintenance",
     sd_title: "📁 SD Card Logs",
@@ -287,11 +290,14 @@ const i18n = {
     stats_count: "Frames (Received / KO)",
     stats_crc_errors: "CRC Errors",
     flash_title: "⚡ Firmware Update",
-    flash_desc: "Flash version <strong>v1.6.0</strong> directly from your browser via USB port.",
+    flash_desc: "Flash version <strong>v1.6.1</strong> directly from your browser via USB port.",
+    flash_version: "Firmware Version:",
+    flash_version_latest: "Latest version (v1.6.1)",
+    flash_version_131: "Historical version (v1.3.1)",
+    flash_btn_flash: "Flash Board (v1.6.1)",
     flash_band: "Board's native Radio Band:",
     flash_band_868: "868 MHz (Europe)",
     flash_band_433: "433 MHz",
-    flash_btn_flash: "Flash Board (v1.6.0)",
     flash_status_label: "Status:",
     flash_status_waiting: "Waiting...",
     trackers_title: "🛸 Detected Transmitters (Active Trackers)",
@@ -464,6 +470,7 @@ const btnSend = document.getElementById('btn-send');
 // Flasher
 const btnFlash = document.getElementById('btn-flash');
 const selectBand = document.getElementById('select-band');
+const selectFwVersion = document.getElementById('select-fw-version');
 const flashProgressContainer = document.getElementById('flash-progress-container');
 const flashProgressBar = document.getElementById('flash-progress-bar');
 const lblFlashStatus = document.getElementById('lbl-flash-status');
@@ -1631,7 +1638,10 @@ function exportTelemetryToCSV() {
 // ============================================================================
 async function flashFirmware() {
   const band = selectBand ? selectBand.value : '868';
-  const binUrl = `binaries/firmware_bluetooth_${band}.bin`;
+  const fwVersion = selectFwVersion ? selectFwVersion.value : 'latest';
+  const binUrl = fwVersion === 'v1.3.1'
+    ? `binaries/firmware_bluetooth_${band}_v1.3.1.bin`
+    : `binaries/firmware_bluetooth_${band}.bin`;
   
   if (isConnected) {
     alert(getTranslation('alert_monitor_active_disconnect'));
@@ -1639,6 +1649,8 @@ async function flashFirmware() {
   }
   
   setElementDisabled(btnFlash, true);
+  setElementDisabled(selectBand, true);
+  setElementDisabled(selectFwVersion, true);
   if (flashProgressContainer) flashProgressContainer.classList.remove('hidden');
   if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_connecting');
   if (lblFlashPercent) lblFlashPercent.textContent = "0%";
@@ -1725,6 +1737,8 @@ async function flashFirmware() {
       } catch (err) {}
     }
     setElementDisabled(btnFlash, false);
+    setElementDisabled(selectBand, false);
+    setElementDisabled(selectFwVersion, false);
   }
 }
 
