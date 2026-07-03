@@ -498,7 +498,6 @@ const btnSend = document.getElementById('btn-send');
 // Flasher
 const btnFlash = document.getElementById('btn-flash');
 const selectBand = document.getElementById('select-band');
-const selectFwVersion = document.getElementById('select-fw-version');
 const flashProgressContainer = document.getElementById('flash-progress-container');
 const flashProgressBar = document.getElementById('flash-progress-bar');
 const lblFlashStatus = document.getElementById('lbl-flash-status');
