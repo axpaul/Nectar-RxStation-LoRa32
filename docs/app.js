@@ -432,6 +432,32 @@ function setLanguage(lang) {
   renderTelemetryTable();
   updateTrackersTable();
   renderAtHelperList();
+  updateFlashTexts();
+}
+
+function updateFlashTexts() {
+  const fwVersion = selectFwVersion ? selectFwVersion.value : 'latest';
+  const verStr = fwVersion === 'v1.3.1' ? 'v1.3.1' : 'v1.6.1';
+  
+  // Mettre à jour la description
+  const descEl = document.querySelector('[data-i18n="flash_desc"]');
+  if (descEl) {
+    if (currentLang === 'fr') {
+      descEl.innerHTML = `Flashez directement la version <strong>${verStr}</strong> depuis votre navigateur par port USB.`;
+    } else {
+      descEl.innerHTML = `Flash version <strong>${verStr}</strong> directly from your browser via USB port.`;
+    }
+  }
+  
+  // Mettre à jour le bouton
+  const btnEl = document.getElementById('btn-flash');
+  if (btnEl) {
+    if (currentLang === 'fr') {
+      btnEl.textContent = `Flasher la carte (${verStr})`;
+    } else {
+      btnEl.textContent = `Flash Board (${verStr})`;
+    }
+  }
 }
 
 // ============================================================================
@@ -1751,6 +1777,7 @@ async function flashFirmware() {
 if (btnConnect) btnConnect.addEventListener('click', connectSerial);
 if (btnDisconnect) btnDisconnect.addEventListener('click', disconnectSerial);
 if (btnFlash) btnFlash.addEventListener('click', flashFirmware);
+if (selectFwVersion) selectFwVersion.addEventListener('change', updateFlashTexts);
 
 // Événements de la carte SD
 if (btnListSd) {
