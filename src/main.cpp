@@ -205,9 +205,22 @@ void vRadioRxTask(void *pvParameters) {
         packet.rssi = rssi_val;
         packet.snr = snr_val;
         packet.timestamp = rtc.getEpoch();
-        packet.ssid_num = rxBuffer[0];
-        packet.apid = rxBuffer[1];
-        packet.ssid_type = rxBuffer[2];
+        if (rxBuffer[0] == NECTAR_MAGIC) {
+          packet.id_mission = rxBuffer[1] | (rxBuffer[2] << 8);
+          packet.apid = packet.id_mission & 0x3F;
+          packet.ssid_num = (packet.id_mission >> 6) & 0xFF;
+          packet.ssid_type = (packet.id_mission >> 14) & 0x03;
+        } else {
+          // Fallback de sécurité : convertit l'ancien format en format standard NectarMC
+          packet.ssid_num = rxBuffer[0];
+          packet.apid = rxBuffer[1];
+          packet.ssid_type = rxBuffer[2];
+          uint16_t ssid = ((packet.ssid_type & 0x03) << 8) | packet.ssid_num;
+          packet.id_mission = (ssid << 6) | (packet.apid & 0x3F);
+          packet.data[0] = NECTAR_MAGIC;
+          packet.data[1] = packet.id_mission & 0xFF;
+          packet.data[2] = (packet.id_mission >> 8) & 0xFF;
+        }
 
         // Envoyer le paquet dans la file d'attente pour traitement par le cœur 0
         if (xQueueSend(rxQueue, &packet, 0) != pdTRUE) {
@@ -234,7 +247,7 @@ void vIOProcessingTask(void *pvParameters) {
       // 1. Transmission binaire NectarMC (USB et Bluetooth)
       const uint8_t* payload = &packet.data[3];
       size_t payload_len = packet.length - 3;
-      sendNectarFrame(packet.ssid_type, packet.ssid_num, packet.apid, payload, payload_len, packet.rssi, packet.snr);
+      sendNectarFrame(packet.id_mission, payload, payload_len, packet.rssi, packet.snr);
 
       // 2. Enregistrement sur la carte SD si elle est disponible
       if (*SDCard) {

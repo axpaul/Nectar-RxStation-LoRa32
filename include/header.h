@@ -94,7 +94,7 @@ extern BluetoothSerial SerialBT;
 // ============================================================================
 // Structures et variables globales
 // ============================================================================
-#define DEFAULT_FRAME_FORMAT        1 // 0: Sans GSFLAG (sans metadata), 1: Avec GSFLAG (metadata dynamiques)
+#define DEFAULT_FRAME_FORMAT        2 // 0: Sans GSFLAG, 1: GS 0x3F, 2: GS 0x03, 3: GS 0x00
 
 struct LoRaConfig {
   float frequency;
@@ -102,7 +102,7 @@ struct LoRaConfig {
   float bandwidth;
   bool crcEnable;
   bool crcMode; // false = CCITT, true = IBM
-  uint8_t activeFrameFormat; // Format de trame série vers le PC (0: Sans GSFLAG, 1: Avec GSFLAG)
+  uint8_t activeFrameFormat; // Format de trame série (0: Sans GSFLAG, 1: GS 0x3F, 2: GS 0x03, 3: GS 0x00)
 };
 
 // Structure encapsulant un paquet reçu et ses métadonnées pour transfert inter-cœur
@@ -115,6 +115,7 @@ struct LoRaPacket {
   uint8_t ssid_num;
   uint8_t apid;
   uint8_t ssid_type;
+  uint16_t id_mission;
 };
 
 extern LoRaConfig activeConfig;
@@ -170,7 +171,7 @@ void IRAM_ATTR setFlag(void);
 
 // Protocoles et communication NectarMC
 uint16_t calculate_crc16(const uint8_t *data, size_t len);
-void sendNectarFrame(uint8_t ssid_type, uint8_t ssid_num, uint8_t apid, const uint8_t *payload, size_t len, int8_t rssi, int8_t snr);
+void sendNectarFrame(uint16_t id_mission, const uint8_t *payload, size_t len, int8_t rssi, int8_t snr);
 
 // Commandes de configuration AT (Série / Bluetooth)
 void checkSerialCommands(SX1276 *radio);

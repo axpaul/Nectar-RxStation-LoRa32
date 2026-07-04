@@ -223,11 +223,11 @@ void handleConfigCommand(const char* cmd, Stream& responseStream, SX1276 *radio)
   // AT+FMT=<0|1> ou AT+FMT?
   else if (strncmp(cmd, "AT+FMT=", 7) == 0) {
     int val = atoi(cmd + 7);
-    if (val == 0 || val == 1) {
+    if (val >= 0 && val <= 3) {
       activeConfig.activeFrameFormat = val;
       responseStream.println("OK");
     } else {
-      responseStream.println("ERROR: Format must be 0 (No GSFLAG) or 1 (With GSFLAG)");
+      responseStream.println("ERROR: Format must be 0 (No GSFLAG), 1 (GS 0x3F), 2 (GS 0x03) or 3 (GS 0x00)");
     }
   } else if (strcmp(cmd, "AT+FMT?") == 0) {
     responseStream.printf("+FMT: %d\n", activeConfig.activeFrameFormat);
@@ -250,7 +250,9 @@ void handleConfigCommand(const char* cmd, Stream& responseStream, SX1276 *radio)
     }
     const char* fmtStr = "Unknown";
     if (activeConfig.activeFrameFormat == 0) fmtStr = "0 (Sans GSFLAG - Sans Metadata)";
-    else if (activeConfig.activeFrameFormat == 1) fmtStr = "1 (Avec GSFLAG - Metadata dynamiques)";
+    else if (activeConfig.activeFrameFormat == 1) fmtStr = "1 (GSFLAG 0x3F - RSSI + SNR + Time)";
+    else if (activeConfig.activeFrameFormat == 2) fmtStr = "2 (GSFLAG 0x03 - RSSI + SNR)";
+    else if (activeConfig.activeFrameFormat == 3) fmtStr = "3 (GSFLAG 0x00 - No Metadata)";
     responseStream.printf("Serial Frame Format: %s\n", fmtStr);
     responseStream.printf("SD Card Connected : %s\n", *SDCard ? "Yes" : "No");
 #if ENABLE_BLUETOOTH
@@ -297,7 +299,7 @@ void handleConfigCommand(const char* cmd, Stream& responseStream, SX1276 *radio)
     responseStream.println("AT+BW?         : Get active Bandwidth");
     responseStream.println("AT+CRC=<0|1>   : Set Hardware CRC (0=OFF, 1=ON)");
     responseStream.println("AT+CRC?        : Get Hardware CRC status");
-    responseStream.println("AT+FMT=<0|1>   : Set output format (0=Sans GSFLAG, 1=Avec GSFLAG)");
+    responseStream.println("AT+FMT=<0-3>   : Set output format (0=No GSFLAG, 1=GS 0x3F, 2=GS 0x03, 3=GS 0x00)");
     responseStream.println("AT+FMT?        : Get active output format");
     responseStream.println("AT+TIME=<epoch>: Set RTC time (Unix Epoch)");
     responseStream.println("AT+TIME?       : Get RTC time (Unix Epoch)");
