@@ -178,10 +178,10 @@ Nombre d'octets de la payload qui suit. Le parseur lit exactement ce nombre d'oc
 | **5+N** | `int8_t` | `RSSI` | *(si bit 0 de gs_flag)* RSSI en dBm. |
 | **5+N+M₁** | `int8_t` | `SNR` | *(si bit 1 de gs_flag)* SNR en quarts de dB. |
 | **5+N+M₁+M₂** | `uint32_t` | `Timestamp` | *(si bits 2–5 de gs_flag)* Epoch Unix LE (4 octets). |
-| **Taille−3 à Taille−2** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian sur les octets 0 à dernier octet de métadonnée. |
-| **Taille−1** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |
+| **5+N+M₁+M₂+T** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian (2 octets). Calculé sur tous les octets précédents (index 0 à `4+N+M₁+M₂+T`). |
+| **7+N+M₁+M₂+T** | `char` | `Newline` | Terminaison de trame `\n` (`0x0A`). |
 
-> Où `M₁` = 1 si RSSI présent, 0 sinon. `M₂` = 1 si SNR présent, 0 sinon.
+> Où `M₁` = 1 si RSSI présent, 0 sinon. `M₂` = 1 si SNR présent, 0 sinon. `T` = 4 si Timestamp présent, 0 sinon.
 
 ---
 
@@ -231,7 +231,6 @@ Pour s'assurer que vos parseurs côté PC fonctionnent correctement, voici le r�
 | | `AT+FMT=1` | `13 + N` | Header 5 octets (`gs_flag = 0x3F`). RSSI + SNR + Timestamp (4B). |
 | | `AT+FMT=3` | `8 + N` | Header 5 octets (`gs_flag = 0x00`). Aucune métadonnée. |
 | | `AT+FMT=0` | `7 + N` | Header 4 octets (sans `gs_flag`). Format historique v1.3.1. |
-| **v1.5.0** | — | `12 + N + M` | Header 5 octets (`gs_flag = 0x3F`). RSSI, SNR et Timestamp obligatoires. |
 | **v1.3.1** | — | `7 + N` | Header 4 octets. Aucun champ supplémentaire. |
 
 ---

@@ -20,14 +20,12 @@
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2Static(U8G2_R0, U8X8_PIN_NONE);
 SPIClass SDSPIStatic(HSPI);
 bool SDCardStatic = false;
-uint8_t byteArrStatic[MAX_FRAME_SIZE];
 
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C *u8g2 = &u8g2Static;
 SPIClass *SDSPI = &SDSPIStatic;
 bool *SDCard = &SDCardStatic;
 size_t receivedLen = 0;
 char logFileName[32] = "/log.csv";
-uint8_t *byteArr = byteArrStatic;
 SX1276 radio = new Module(RADIO_CS_PIN, RADIO_DIO0_PIN, RADIO_RST_PIN, RADIO_BUSY_PIN);
 LoRaConfig activeConfig;
 
@@ -186,13 +184,14 @@ void vRadioRxTask(void *pvParameters) {
       size_t len = 0;
       int8_t rssi_val = 0;
       int8_t snr_val = 0;
+      float rxRssi = 0, rxSnr = 0;
 
       // Prendre le mutex radio pour accès exclusif au module SX1276 sur le bus SPI
       if (xSemaphoreTake(radioMutex, portMAX_DELAY) == pdTRUE) {
-        len = RadioReceive(&radio, rxBuffer, MAX_FRAME_SIZE);
+        len = RadioReceive(&radio, rxBuffer, MAX_FRAME_SIZE, &rxRssi, &rxSnr);
         if (len > 0) {
-          rssi_val = (int8_t)dispRssi;
-          snr_val = (int8_t)(dispSnr * 4.0f);
+          rssi_val = (int8_t)rxRssi;
+          snr_val = (int8_t)(rxSnr * 4.0f);
         }
         xSemaphoreGive(radioMutex);
       }

@@ -121,6 +121,8 @@ float readBatteryVoltage() {
  * @param radio Pointeur vers le composant SX1276.
  * @param byteArr Tableau recevant la charge utile décodée.
  * @param maxLen Capacité maximale du tableau de réception.
+ * @param outRssi Pointeur recevant la valeur RSSI du paquet (en dBm).
+ * @param outSnr Pointeur recevant la valeur SNR du paquet (en dB).
  * @return Taille du paquet reçu en octets, ou 0 en cas d'absence de paquet ou d'erreur.
  * 
  * Cette fonction vérifie si le drapeau d'interruption a été activé. Elle désactive les interrupts,
@@ -128,7 +130,7 @@ float readBatteryVoltage() {
  * met à jour les indicateurs physiques de signal (RSSI, SNR), actualise l'afficheur OLED,
  * puis réactive l'écoute continue du composant radio.
  */
-size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen) {
+size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen, float *outRssi, float *outSnr) {
   // Désactiver les interruptions le temps de traiter le paquet
   enableInterrupt = false;
 
@@ -150,6 +152,8 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen) {
         strcpy(dispSsidApid, "Invalid size (<5B)");
         displayNeedsUpdate = true;
         taskEXIT_CRITICAL(&dispMux);
+        *outRssi = 0;
+        *outSnr = 0;
         RadioStartListen(radio);
         return 0;
       }
@@ -164,6 +168,8 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen) {
         strcpy(dispSsidApid, "CRC Error (Soft)");
         displayNeedsUpdate = true;
         taskEXIT_CRITICAL(&dispMux);
+        *outRssi = 0;
+        *outSnr = 0;
         RadioStartListen(radio);
         return 0;
       }
@@ -171,6 +177,10 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen) {
       // Retirer les 2 octets de CRC
       length -= 2;
     }
+
+    // Lecture RSSI/SNR via SPI en dehors de la section critique (évite le blocage SPI)
+    float localRssi = radio->getRSSI();
+    float localSnr = radio->getSNR();
 
     rxCount++;
     // Formatage compact sans espace et limitation à 3 chiffres (0-999) pour conserver de l'espace
@@ -215,8 +225,8 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen) {
       strcpy(dispSsidApid, "Invalid frame (<3B)");
     }
     
-    dispRssi = radio->getRSSI();
-    dispSnr = radio->getSNR();
+    dispRssi = localRssi;
+    dispSnr = localSnr;
     dispHasFrame = true;
 
     // Statistiques de débit de données
@@ -224,28 +234,40 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen) {
 
     displayNeedsUpdate = true;
     taskEXIT_CRITICAL(&dispMux);
+    *outRssi = localRssi;
+    *outSnr = localSnr;
     RadioStartListen(radio);
     return length;
   } else if (state == RADIOLIB_ERR_CRC_MISMATCH) {
+    // Lecture RSSI/SNR via SPI en dehors de la section critique
+    float localRssi = radio->getRSSI();
+    float localSnr = radio->getSNR();
     errCount++;
     taskENTER_CRITICAL(&dispMux);
     snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", rxCount % 1000, errCount % 1000);
-    dispRssi = radio->getRSSI();
-    dispSnr = radio->getSNR();
+    dispRssi = localRssi;
+    dispSnr = localSnr;
     
     displayNeedsUpdate = true;
     taskEXIT_CRITICAL(&dispMux);
+    *outRssi = 0;
+    *outSnr = 0;
     RadioStartListen(radio);
     return 0;
   } else {
+    // Lecture RSSI/SNR via SPI en dehors de la section critique
+    float localRssi = radio->getRSSI();
+    float localSnr = radio->getSNR();
     errCount++;
     taskENTER_CRITICAL(&dispMux);
     snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", rxCount % 1000, errCount % 1000);
-    dispRssi = radio->getRSSI();
-    dispSnr = radio->getSNR();
+    dispRssi = localRssi;
+    dispSnr = localSnr;
     
     displayNeedsUpdate = true;
     taskEXIT_CRITICAL(&dispMux);
+    *outRssi = 0;
+    *outSnr = 0;
     RadioStartListen(radio);
     return 0;
   }
