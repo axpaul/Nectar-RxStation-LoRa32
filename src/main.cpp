@@ -247,7 +247,7 @@ void vIOProcessingTask(void *pvParameters) {
       // 1. Transmission binaire NectarMC (USB et Bluetooth)
       const uint8_t* payload = &packet.data[3];
       size_t payload_len = packet.length - 3;
-      sendNectarFrame(packet.id_mission, payload, payload_len, packet.rssi, packet.snr);
+      sendNectarFrame(packet.data, payload, payload_len, packet.rssi, packet.snr);
 
       // 2. Enregistrement sur la carte SD si elle est disponible
       if (*SDCard) {
