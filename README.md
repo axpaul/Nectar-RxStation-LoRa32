@@ -66,9 +66,9 @@ Les informations détaillées s'affichent sous forme de deux écrans alternant a
 
 ## Format des Trames (Radio & Série NectarMC)
 
-Les données transitent sous deux formats de trames différents selon le canal (Liaison Radio LoRa dans les airs, ou Liaison Série USB / Bluetooth vers le PC) :
-*   **Trames Radio LoRa (Air)** : Trames simplifiées émises par les trackers, avec ou sans signature CRC selon l'option choisie.
-*   **Trames Série NectarMC (USB / Bluetooth)** : Trames binaires configurables : soit avec en-tête `gs_flag` (métadonnées RSSI/SNR et Timestamp Unix Epoch de 4 octets conditionnés par le bitmask de `gs_flag`), soit au format historique v1.3.1 (sans `gs_flag` ni aucune métadonnée).
+Les données transitent sous le format standard NectarMC selon le canal (Liaison Radio LoRa dans les airs, ou Liaison Série USB / Bluetooth vers le PC) :
+*   **Trames Radio LoRa (Air)** : Commencent systématiquement par le Magic byte `0xEB` et l'Id_mission de 2 octets (encapsulant SSID et APID), suivis de la payload et d'une validation CRC. Un fallback automatique supporte également les formats historiques sans Magic byte.
+*   **Trames Série NectarMC (USB / Bluetooth)** : Trames binaires configurables via `AT+FMT=<0-3>` : format par défaut avec RSSI + SNR (GSFLAG = `0x03`), format avec RSSI + SNR + Horodatage Unix (GSFLAG = `0x3F`), format avec GSFLAG à `0x00` (sans métadonnée), ou format historique sans GSFLAG (Format 0).
 
 Pour consulter les schémas binaires complets, les descriptions détaillées de chaque octet et les tables d'encodage :
 👉 **[Consulter le Guide des Formats de Trames](./FRAME_GUIDE.md)**
