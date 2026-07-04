@@ -1,6 +1,6 @@
 # NECTAR RX STATION - LoRa32 (Station Sol Nectar)
 
-**NECTAR RX STATION - LoRa32** est la station au sol de réception LoRa officielle de l'écosystème **Nectar**, destinée à capter la télémétrie de fusées expérimentales et de ballons-sondes. Elle repose sur la carte de développement [LilyGO TTGO T3 V1.6.1 (LoRa32 V2.1.6)](https://lilygo.cc/en-us/products/lora3) équipée d'un microcontrôleur ESP32, d'un module radio SX1276 et d'un écran OLED intégré. Elle fonctionne à la fréquence de 869.525 MHz (868 MHz ou 433 Mhz Bande ICM en fonction de la version).
+**NECTAR RX STATION - LoRa32** est la station au sol de réception LoRa officielle de l'écosystème **Nectar**, destinée à capter la télémétrie de fusées expérimentales et de ballons-sondes. Elle repose sur la carte de développement [LilyGO TTGO T3 V1.6.1 (LoRa32 V2.1.6)](https://lilygo.cc/en-us/products/lora3) équipée d'un microcontrôleur ESP32, d'un module radio SX1276 et d'un écran OLED intégré. Elle fonctionne à la fréquence de 869.525 MHz (868 MHz ou 433 MHz Bande ICM en fonction de la version).
 
 Elle est notamment pleinement compatible avec le tracker : [Wasp-TxTracker-TTGO](https://github.com/axpaul/Wasp-TxTracker-TTGO), ainsi qu'avec le logiciel de visualisation et de traitement de télémétrie au sol [NectarMC](https://github.com/mlavardin/NectarMC).
 
@@ -244,7 +244,7 @@ pio run -t upload
 > *   **Piloter la station par port COM USB** : Connectez votre récepteur LoRa32 en un clic et configurez-le dynamiquement (fréquence, Spreading Factor, Bande Passante) à l'aide de boutons simples ou de la console AT interactive.
 > *   **Suivre les Trackers Actifs en temps réel** : La page liste automatiquement tous les émetteurs détectés (fusées, minifusées, ballons...) avec leurs types de mission, APID, nombre de trames et charges utiles. Elle détecte et marque automatiquement comme `PERDU` les trackers inactifs pendant plus de 15 secondes.
 > *   **Tracer le débit de données** : Un graphique SVG en temps réel affiche le flux instantané de données reçues.
-> *   **Flasher le firmware en ligne** : Mettez à jour le micrologiciel de votre carte TTGO avec la version **v1.3.1** native (en 868 ou 433 MHz) directement en un clic depuis le navigateur grâce à `esptool-js`.
+> *   **Flasher le firmware en ligne** : Mettez à jour le micrologiciel de votre carte TTGO avec la dernière version native (en 868 ou 433 MHz) directement en un clic depuis le navigateur grâce à `esptool-js`.
 > ### 2. Logiciel de Traitement & Visualisation 3D : NectarMC
 > La station sol est entièrement configurée pour transmettre les données de vol en temps réel vers le logiciel principal de visualisation de la télémétrie :
 > 👉 **[Découvrir NectarMC sur GitHub](https://github.com/mlavardin/NectarMC)**

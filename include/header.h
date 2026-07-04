@@ -165,7 +165,7 @@ void resetLoRaConfig();
 
 // Gestion du module radio SX1276
 void RadioSettings(U8G2_SSD1306_128X64_NONAME_F_HW_I2C* u8g2, SX1276 *radio);
-size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen);
+size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen, float *outRssi, float *outSnr);
 void RadioStartListen(SX1276 *radio);
 void IRAM_ATTR setFlag(void);
 
