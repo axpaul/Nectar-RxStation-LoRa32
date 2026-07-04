@@ -74,9 +74,10 @@ Ce format propose un en-tête étendu intégrant l'octet **`gs_flag`** (Ground S
 L'octet `gs_flag` (Octet 3) est un masque de bits utilisé pour activer ou désactiver l'envoi de métriques spécifiques :
 ```
 bit7    bit6    bit5    bit4    bit3    bit2    bit1    bit0
- ─ Réservés ─   └───────── Timestamp ──────────┘   │       │
-                (Si l'un de ces bits est à 1)     │       └─ 1 = Inclure RSSI dans le footer
-                                                   └───────── 1 = Inclure SNR dans le footer
+ │       │       └───────────┬───────────┘       │       │
+ └─ Réservés ─               │                   │       └─ 1 = Inclure RSSI dans le footer
+                             │                   └───────── 1 = Inclure SNR dans le footer
+                             └─ Timestamp (Si l'un de ces bits est à 1)
 ```
 
 * **RSSI** (Octet 5+N si présent) : Présent uniquement si `(gs_flag & 0x01) == 1`.
