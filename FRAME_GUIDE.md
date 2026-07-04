@@ -41,12 +41,12 @@ Si le CRC matériel est désactivé (`AT+CRC=0`), la station s'attend à ce que 
 
 ### Description des octets de la trame radio
 
-| Position | Type | Nom du Champ | Description |
-| :--- | :--- | :--- | :--- |
-| **Octet 0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
-| **Octets 1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission de 2 octets en Little-Endian. Regroupe SSID_TYPE (bits 15-14), SSID_NUM (bits 13-6) et APID (bits 5-0). |
-| **Octets 3 à 2+N** | `uint8_t[]` | `Payload` | Charge utile contenant les données brutes des capteurs ($N$ octets). |
-| **Octets 3+N à 4+N** | `uint16_t` | `CRC16` | *(Option B uniquement)* Somme de contrôle logicielle de 2 octets en Little-Endian calculée sur les octets 0 à `2+N` inclus. |
+| Position / Index | Type | Nom du Champ | Description |
+| :--- | :---: | :--- | :--- |
+| **0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
+| **1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission de 2 octets en Little-Endian. Regroupe SSID_TYPE (bits 15-14), SSID_NUM (bits 13-6) et APID (bits 5-0). |
+| **3 à 2+N** | `uint8_t[]` | `Payload` | Charge utile contenant les données brutes des capteurs ($N$ octets). |
+| **3+N à 4+N** | `uint16_t` | `CRC16` | *(Option B uniquement)* Somme de contrôle logicielle de 2 octets en Little-Endian calculée sur les octets 0 à `2+N` inclus. |
 
 ---
 
@@ -139,17 +139,18 @@ bit7    bit6    bit5    bit4    bit3    bit2    bit1    bit0
 * **Timestamp** (4 octets si présent) : Présent uniquement si `(gs_flag & 0x3C) != 0` (les bits 2 à 5 décrivent sa présence).
 
 #### Description détaillée des octets (Formats 1, 2, 3) :
-| Position | Type | Nom du Champ | Description |
-| :--- | :--- | :--- | :--- |
-| **Octet 0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
-| **Octets 1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission Little-Endian. Regroupe SSID_TYPE (bits 15-14), SSID_NUM (bits 13-6) et APID (bits 5-0). |
-| **Octet 3** | `uint8_t` | `gs_flag` | Masque de bits indiquant la présence des métadonnées dans le footer (`0x3F`, `0x03` ou `0x00`). |
-| **Octet 4** | `uint8_t` | `payload_size` | Longueur $N$ de la charge utile LoRa brute. |
-| **Octets 5 à 4+N** | `uint8_t[]` | `Payload` | Données brutes LoRa ($N$ octets). |
-| **Octets facultatifs** | `int8_t` | `RSSI` / `SNR` | En fonction de `gs_flag` (0, 1 ou 2 octets insérés après la payload). Le RSSI est exprimé directement en dBm, le SNR est codé en quarts de dB (SNR réel en dB = valeur_transmise / 4). |
-| **4 octets suivants** | `uint32_t` | `Timestamp` | (Optionnel) Horodatage Unix Epoch (secondes) Little-Endian issu de la RTC de la station (présent si `gs_flag & 0x3C` est non-nul). |
-| **2 octets suivants** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian calculé sur toute la trame (du Magic `0xEB` jusqu'aux métadonnées incluses). |
-| **Dernier octet** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |
+| Position / Index | Type | Nom du Champ | Description |
+| :--- | :---: | :--- | :--- |
+| **0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
+| **1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission Little-Endian. Regroupe SSID_TYPE (bits 15-14), SSID_NUM (bits 13-6) et APID (bits 5-0). |
+| **3** | `uint8_t` | `gs_flag` | Masque de bits indiquant la présence des métadonnées dans le footer (`0x3F`, `0x03` ou `0x00`). |
+| **4** | `uint8_t` | `payload_size` | Longueur $N$ de la charge utile LoRa brute. |
+| **5 à 4+N** | `uint8_t[]` | `Payload` | Données brutes LoRa ($N$ octets). |
+| **5+N** *(si RSSI)* | `int8_t` | `RSSI` | RSSI du signal (dBm). Présent uniquement si `(gs_flag & 0x01) == 1` (soit $M_{rssi} = 1$). |
+| **5+N + M_rssi** *(si SNR)* | `int8_t` | `SNR` | SNR en quarts de dB. Présent uniquement si `(gs_flag & 0x02) == 2` (soit $M_{snr} = 1$). |
+| **5+N + M_rssi + M_snr** *(si RTC)* | `uint32_t` | `Timestamp` | Horodatage Unix Epoch (secondes) Little-Endian (4 octets). Présent si `(gs_flag & 0x3C) != 0` (soit $T = 4$). |
+| **Taille - 3 à Taille - 2** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian (2 octets) calculé de l'index 0 jusqu'au dernier octet de métadonnée inclus. |
+| **Taille - 1** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |
 
 ---
 
@@ -168,14 +169,14 @@ Ce format binaire minimaliste n'inclut aucune métadonnée réseau (RSSI, SNR) n
 ```
 
 #### Description détaillée des octets :
-| Position | Type | Nom du Champ | Description |
-| :--- | :--- | :--- | :--- |
-| **Octet 0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
-| **Octets 1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission Little-Endian. Regroupe SSID_TYPE (bits 15-14), SSID_NUM (bits 13-6) et APID (bits 5-0). |
-| **Octet 3** | `uint8_t` | `payload_size` | Longueur $N$ de la charge utile LoRa brute. |
-| **Octets 4 à 3+N** | `uint8_t[]` | `Payload` | Données brutes LoRa ($N$ octets). |
-| **Octets 4+N à 5+N** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian calculé sur les octets 0 à `3+N` (Header + Payload). |
-| **Octet 6+N** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |
+| Position / Index | Type | Nom du Champ | Description |
+| :--- | :---: | :--- | :--- |
+| **0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
+| **1 à 2** | `uint16_t` | `Id_mission` | Identifiant de mission Little-Endian. Regroupe SSID_TYPE (bits 15-14), SSID_NUM (bits 13-6) et APID (bits 5-0). |
+| **3** | `uint8_t` | `payload_size` | Longueur $N$ de la charge utile LoRa brute. |
+| **4 à 3+N** | `uint8_t[]` | `Payload` | Données brutes LoRa ($N$ octets). |
+| **4+N à 5+N** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian (2 octets) calculé sur les octets 0 à `3+N` (Header + Payload). |
+| **6+N** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |
 
 ---
 
