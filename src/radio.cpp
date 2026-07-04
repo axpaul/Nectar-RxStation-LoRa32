@@ -185,9 +185,21 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen) {
     
     // Décodage du couple SSID et APID (Trame minimale valide = 3 octets)
     if (length >= 3) {
-      uint8_t ssid_num  = byteArr[0];
-      uint8_t apid      = byteArr[1];
-      uint8_t ssid_type = byteArr[2];
+      uint8_t ssid_num;
+      uint8_t apid;
+      uint8_t ssid_type;
+
+      if (byteArr[0] == NECTAR_MAGIC) {
+        uint16_t id_mission = byteArr[1] | (byteArr[2] << 8);
+        apid = id_mission & 0x3F;
+        ssid_num = (id_mission >> 6) & 0xFF;
+        ssid_type = (id_mission >> 14) & 0x03;
+      } else {
+        // Fallback de sécurité historique
+        ssid_num  = byteArr[0];
+        apid      = byteArr[1];
+        ssid_type = byteArr[2];
+      }
 
       const char* ssid_prefix = "OTHER";
       if (ssid_type == 0) ssid_prefix = "FX";
