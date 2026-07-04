@@ -55,29 +55,33 @@ uint16_t calculate_crc16(const uint8_t *data, size_t len) {
  * La trame finale est émise sur USB (Serial) et Bluetooth (SerialBT) si un appareil est appairé.
  * Un caractère '\n' est ajouté en fin de trame pour en faciliter l'enregistrement.
  */
-void sendNectarFrame(uint8_t ssid_type, uint8_t ssid_num, uint8_t apid, const uint8_t *payload, size_t len, int8_t rssi, int8_t snr) {
+void sendNectarFrame(uint16_t id_mission, const uint8_t *payload, size_t len, int8_t rssi, int8_t snr) {
     // 1. Limiter la longueur brute de LoRa à 250 octets max pour laisser de la place
     if (len > 250) {
         len = 250;
     }
 
-    // 2. Calculer le SSID (10 bits) et l'Id_mission (16 bits)
-    uint16_t ssid = ((ssid_type & 0x03) << 8) | ssid_num;
-    uint16_t id_mission = (ssid << 6) | (apid & 0x3F);
-
     uint8_t frame[275];
     size_t frameIndex = 0;
 
+    // Écriture unique du header commun NectarMC
+    frame[0] = NECTAR_MAGIC;
+    frame[1] = id_mission & 0xFF;
+    frame[2] = (id_mission >> 8) & 0xFF;
+
     // 3. Assembler le buffer série selon le format configuré
-    if (activeConfig.activeFrameFormat == 1) {
-        // --- FORMAT AVEC GSFLAG (Dynamique avec Timestamp) ---
+    if (activeConfig.activeFrameFormat >= 1) {
+        // --- FORMAT AVEC GSFLAG ---
         // Header (5 octets) : MAGIC | Id_mission (2B) | gs_flag (1B) | payload_size (1B)
-        frame[0] = NECTAR_MAGIC;
-        frame[1] = id_mission & 0xFF;
-        frame[2] = (id_mission >> 8) & 0xFF;
+        uint8_t gs_flag = 0x00;
+        if (activeConfig.activeFrameFormat == 1) {
+            gs_flag = 0x3F; // RSSI + SNR + Timestamp
+        } else if (activeConfig.activeFrameFormat == 2) {
+            gs_flag = 0x03; // RSSI + SNR
+        } else if (activeConfig.activeFrameFormat == 3) {
+            gs_flag = 0x00; // Pas de métadonnées, GSFLAG à 0
+        }
         
-        // gs_flag = 0x3F (RSSI + SNR + Timestamp activés par la station sol)
-        uint8_t gs_flag = 0x3F;
         frame[3] = gs_flag;
         frame[4] = (uint8_t)(len & 0xFF);
         frameIndex = 5;
@@ -114,9 +118,6 @@ void sendNectarFrame(uint8_t ssid_type, uint8_t ssid_num, uint8_t apid, const ui
     else {
         // --- FORMAT SANS GSFLAG (Original - v1.3.1 / master) ---
         // Header (4 octets) : MAGIC | Id_mission (2B) | payload_size (1B)
-        frame[0] = NECTAR_MAGIC;
-        frame[1] = id_mission & 0xFF;
-        frame[2] = (id_mission >> 8) & 0xFF;
         frame[3] = (uint8_t)(len & 0xFF);
         frameIndex = 4;
 
