@@ -55,7 +55,7 @@ uint16_t calculate_crc16(const uint8_t *data, size_t len) {
  * La trame finale est émise sur USB (Serial) et Bluetooth (SerialBT) si un appareil est appairé.
  * Un caractère '\n' est ajouté en fin de trame pour en faciliter l'enregistrement.
  */
-void sendNectarFrame(uint16_t id_mission, const uint8_t *payload, size_t len, int8_t rssi, int8_t snr) {
+void sendNectarFrame(const uint8_t *header_bytes, const uint8_t *payload, size_t len, int8_t rssi, int8_t snr) {
     // 1. Limiter la longueur brute de LoRa à 250 octets max pour laisser de la place
     if (len > 250) {
         len = 250;
@@ -64,10 +64,10 @@ void sendNectarFrame(uint16_t id_mission, const uint8_t *payload, size_t len, in
     uint8_t frame[275];
     size_t frameIndex = 0;
 
-    // Écriture unique du header commun NectarMC
-    frame[0] = NECTAR_MAGIC;
-    frame[1] = id_mission & 0xFF;
-    frame[2] = (id_mission >> 8) & 0xFF;
+    // Écriture unique du header commun NectarMC brut
+    frame[0] = header_bytes[0];
+    frame[1] = header_bytes[1];
+    frame[2] = header_bytes[2];
 
     // 3. Assembler le buffer série selon le format configuré
     if (activeConfig.activeFrameFormat >= 1) {
