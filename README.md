@@ -66,11 +66,22 @@ Les informations détaillées s'affichent sous forme de deux écrans alternant a
 
 ## Format des Trames (Radio & Série NectarMC)
 
-Les données transitent sous le format standard NectarMC selon le canal (Liaison Radio LoRa dans les airs, ou Liaison Série USB / Bluetooth vers le PC) :
-*   **Trames Radio LoRa (Air)** : Commencent systématiquement par le Magic byte `0xEB` et l'Id_mission de 2 octets (encapsulant SSID et APID), suivis de la payload et d'une validation CRC. Un fallback automatique supporte également les formats historiques sans Magic byte.
-*   **Trames Série NectarMC (USB / Bluetooth)** : Trames binaires configurables via `AT+FMT=<0-3>` : format par défaut avec RSSI + SNR (GSFLAG = `0x03`), format avec RSSI + SNR + Horodatage Unix (GSFLAG = `0x3F`), format avec GSFLAG à `0x00` (sans métadonnée), ou format historique sans GSFLAG (Format 0).
+Les données transitent sous le format standard **NectarMC** selon le canal de communication :
 
-Pour consulter les schémas binaires complets, les descriptions détaillées de chaque octet et les tables d'encodage :
+*   **📡 Trames Radio LoRa (Bord → Station sol)** :
+    Chaque paquet commence par le Magic byte `0xEB` suivi de l'`Id_mission` encodé sur 16 bits en Little-Endian, qui encapsule le **SSID** (type de mission + numéro, 10 bits) et l'**APID** (identifiant applicatif, 6 bits). Un mécanisme de fallback détecte et convertit automatiquement les trames historiques sans Magic byte.
+
+*   **💻 Trames Série NectarMC (Station sol → PC)** :
+    Trames binaires encapsulées avec CRC16-CCITT, configurables via `AT+FMT=<0-3>` :
+
+    | Format | `gs_flag` | Contenu Footer | Commande |
+    | :---: | :---: | :--- | :--- |
+    | **2** *(défaut)* | `0x03` | RSSI + SNR | `AT+FMT=2` |
+    | **1** | `0x3F` | RSSI + SNR + Timestamp | `AT+FMT=1` |
+    | **3** | `0x00` | Aucune métadonnée | `AT+FMT=3` |
+    | **0** | *(absent)* | Format historique v1.3.1 | `AT+FMT=0` |
+
+Pour consulter les schémas binaires complets, les descriptions détaillées de chaque octet, les tables d'encodage SSID/APID et les exemples :
 👉 **[Consulter le Guide des Formats de Trames](./FRAME_GUIDE.md)**
 
 ---
