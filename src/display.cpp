@@ -106,7 +106,7 @@ void updateDisplay(U8G2_SSD1306_128X64_NONAME_F_HW_I2C* u8g2, SX1276* radio) {
   float localSnr;
   bool localHasFrame;
   uint32_t localBytesReceived;
-  unsigned long localTrackerTimes[256];
+  static unsigned long localTrackerTimes[256];
 
   taskENTER_CRITICAL(&dispMux);
   memcpy(localStatus, dispStatus, sizeof(localStatus));
