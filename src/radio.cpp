@@ -182,6 +182,20 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen, float *outRs
     float localRssi = radio->getRSSI();
     float localSnr = radio->getSNR();
 
+    // Validation stricte du format NectarMC (Magic Byte 0xEB et taille minimale de 3 octets)
+    if (length < 3 || byteArr[0] != NECTAR_MAGIC) {
+      errCount++;
+      taskENTER_CRITICAL(&dispMux);
+      snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", rxCount % 1000, errCount % 1000);
+      strcpy(dispSsidApid, "Bad Magic/Size");
+      displayNeedsUpdate = true;
+      taskEXIT_CRITICAL(&dispMux);
+      *outRssi = 0;
+      *outSnr = 0;
+      RadioStartListen(radio);
+      return 0;
+    }
+
     rxCount++;
     // Formatage compact sans espace et limitation à 3 chiffres (0-999) pour conserver de l'espace
     uint32_t dispRx = rxCount % 1000;
@@ -193,37 +207,22 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen, float *outRs
       snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", dispRx, dispErr);
     }
     
-    // Décodage du couple SSID et APID (Trame minimale valide = 3 octets)
-    if (length >= 3) {
-      uint8_t ssid_num;
-      uint8_t apid;
-      uint8_t ssid_type;
+    // Décodage du couple SSID et APID (Trame garantie NectarMC >= 3 octets)
+    uint16_t id_mission = byteArr[1] | (byteArr[2] << 8);
+    uint8_t apid = id_mission & 0x3F;
+    uint8_t ssid_num = (id_mission >> 6) & 0xFF;
+    uint8_t ssid_type = (id_mission >> 14) & 0x03;
 
-      if (byteArr[0] == NECTAR_MAGIC) {
-        uint16_t id_mission = byteArr[1] | (byteArr[2] << 8);
-        apid = id_mission & 0x3F;
-        ssid_num = (id_mission >> 6) & 0xFF;
-        ssid_type = (id_mission >> 14) & 0x03;
-      } else {
-        // Fallback de sécurité historique
-        ssid_num  = byteArr[0];
-        apid      = byteArr[1];
-        ssid_type = byteArr[2];
-      }
+    const char* ssid_prefix = "OTHER";
+    if (ssid_type == 0) ssid_prefix = "FX";
+    else if (ssid_type == 1) ssid_prefix = "MF";
+    else if (ssid_type == 2) ssid_prefix = "BALLOON";
+    else if (ssid_type == 3) ssid_prefix = "OTHER";
 
-      const char* ssid_prefix = "OTHER";
-      if (ssid_type == 0) ssid_prefix = "FX";
-      else if (ssid_type == 1) ssid_prefix = "MF";
-      else if (ssid_type == 2) ssid_prefix = "BALLOON";
-      else if (ssid_type == 3) ssid_prefix = "OTHER";
-
-      snprintf(dispSsidApid, sizeof(dispSsidApid), "%s%d (APID:%d)", ssid_prefix, ssid_num, apid);
-      
-      // Horodatage de présence du tracker
-      lastTrackerPacketTime[ssid_num] = millis();
-    } else {
-      strcpy(dispSsidApid, "Invalid frame (<3B)");
-    }
+    snprintf(dispSsidApid, sizeof(dispSsidApid), "%s%d (APID:%d)", ssid_prefix, ssid_num, apid);
+    
+    // Horodatage de présence du tracker
+    lastTrackerPacketTime[ssid_num] = millis();
     
     dispRssi = localRssi;
     dispSnr = localSnr;
