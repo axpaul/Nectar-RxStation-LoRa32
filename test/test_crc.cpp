@@ -87,6 +87,66 @@ void test_mission_id_encoding_decoding() {
     TEST_ASSERT_EQUAL_UINT8(input_apid, decoded_apid);
 }
 
+// Helper pour simuler la validation stricte NectarMC sous test
+bool validate_nectarmc_frame(const uint8_t *byteArr, size_t length) {
+    if (length < 3 || byteArr[0] != 0xEB) {
+        return false;
+    }
+    return true;
+}
+
+// Helper pour simuler le décodage NectarMC
+struct TestDecodedMission {
+    uint8_t type;
+    uint8_t num;
+    uint8_t apid;
+};
+
+TestDecodedMission decode_nectarmc_mission(const uint8_t *byteArr) {
+    uint16_t id_mission = byteArr[1] | (byteArr[2] << 8);
+    TestDecodedMission result;
+    result.apid = id_mission & 0x3F;
+    result.num = (id_mission >> 6) & 0xFF;
+    result.type = (id_mission >> 14) & 0x03;
+    return result;
+}
+
+// Test de la validation stricte NectarMC (Rejet et acceptation de trames)
+void test_nectarmc_strict_validation() {
+    // 1. Trame valide standard NectarMC
+    const uint8_t valid_frame[] = {0xEB, 0xC1, 0x01, 0x44, 0x55};
+    TEST_ASSERT_TRUE(validate_nectarmc_frame(valid_frame, 5));
+
+    // 2. Trame trop courte (moins de 3 octets)
+    const uint8_t short_frame[] = {0xEB, 0x01};
+    TEST_ASSERT_FALSE(validate_nectarmc_frame(short_frame, 2));
+
+    // 3. Trame avec un mauvais Magic Byte (ex: 0xAA)
+    const uint8_t bad_magic_frame[] = {0xAA, 0xC1, 0x01, 0x44, 0x55};
+    TEST_ASSERT_FALSE(validate_nectarmc_frame(bad_magic_frame, 5));
+}
+
+// Test du décodage SSID/APID simplifié
+void test_nectarmc_ssid_apid_decoding() {
+    // 1. Cas FX7 avec APID 1 (type=0, num=7, apid=1)
+    // SSID = (0 << 8) | 7 = 7
+    // Id_mission = (7 << 6) | 1 = 449 = 0x01C1 (Little-Endian: 0xC1, 0x01)
+    const uint8_t frame_fx7[] = {0xEB, 0xC1, 0x01};
+    TestDecodedMission decoded1 = decode_nectarmc_mission(frame_fx7);
+    TEST_ASSERT_EQUAL_UINT8(0, decoded1.type);
+    TEST_ASSERT_EQUAL_UINT8(7, decoded1.num);
+    TEST_ASSERT_EQUAL_UINT8(1, decoded1.apid);
+
+    // 2. Cas BALLOON3 avec APID 15 (type=2, num=3, apid=15)
+    // SSID = (2 << 8) | 3 = 515
+    // Id_mission = (515 << 6) | 15 = 32975 = 0x80CF (Little-Endian: 0xCF, 0x80)
+    const uint8_t frame_balloon3[] = {0xEB, 0xCF, 0x80};
+    TestDecodedMission decoded2 = decode_nectarmc_mission(frame_balloon3);
+    TEST_ASSERT_EQUAL_UINT8(2, decoded2.type);
+    TEST_ASSERT_EQUAL_UINT8(3, decoded2.num);
+    TEST_ASSERT_EQUAL_UINT8(15, decoded2.apid);
+}
+
 // Test pour la conversion hexadécimale de la payload
 void test_bytes_to_hex_conversion() {
     const uint8_t test_bytes[] = {0x00, 0x1A, 0xBC, 0xFF, 0x09};
@@ -189,6 +249,8 @@ void setup() {
     // Suite Logique binaire & Formats
     RUN_TEST(test_mission_id_encoding_decoding);
     RUN_TEST(test_bytes_to_hex_conversion);
+    RUN_TEST(test_nectarmc_strict_validation);
+    RUN_TEST(test_nectarmc_ssid_apid_decoding);
     
     // Suite Tension & Mathématiques
     RUN_TEST(test_convert_adc_to_voltage);
