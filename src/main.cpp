@@ -238,12 +238,7 @@ void vIOProcessingTask(void *pvParameters) {
 
       // 2. Enregistrement sur la carte SD si elle est disponible
       if (*SDCard) {
-        const char* ssid_prefix = "OTHER";
-        if (packet.ssid_type == 0) ssid_prefix = "FX";
-        else if (packet.ssid_type == 1) ssid_prefix = "MF";
-        else if (packet.ssid_type == 2) ssid_prefix = "BALLOON";
-        else if (packet.ssid_type == 3) ssid_prefix = "OTHER";
-
+        const char* ssid_prefix = getSsidPrefix(packet.ssid_type);
         char ssid_str[32];
         snprintf(ssid_str, sizeof(ssid_str), "%s%d", ssid_prefix, packet.ssid_num);
 

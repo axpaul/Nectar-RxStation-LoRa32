@@ -147,6 +147,15 @@ extern uint32_t errCount;
 // ============================================================================
 
 // Fonctions matérielles et de mesure
+static inline const char* getSsidPrefix(uint8_t type) {
+  switch (type) {
+    case 0:  return "FX";
+    case 1:  return "MF";
+    case 2:  return "BALLOON";
+    default: return "OTHER";
+  }
+}
+
 float readBatteryVoltage();
 
 // Gestion de l'affichage OLED

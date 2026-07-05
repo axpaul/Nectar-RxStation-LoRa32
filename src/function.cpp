@@ -152,14 +152,14 @@ void writeFrameToFile(const char* filepath, const uint8_t* frame, size_t length,
 
     // 6. Charge utile brute convertie en Hexadécimal continu (sans sprintf)
     static const char hexChars[] = "0123456789ABCDEF";
+    char hexBuffer[MAX_FRAME_SIZE * 2 + 1];
     for (size_t i = 0; i < length; i++) {
-      char hex[2];
-      hex[0] = hexChars[(frame[i] >> 4) & 0x0F];
-      hex[1] = hexChars[frame[i] & 0x0F];
-      log.write((const uint8_t*)hex, 2);
+      hexBuffer[i * 2] = hexChars[(frame[i] >> 4) & 0x0F];
+      hexBuffer[i * 2 + 1] = hexChars[frame[i] & 0x0F];
     }
+    hexBuffer[length * 2] = '\0';
+    log.println(hexBuffer);
 
-    log.println();
     log.close();
   } else {
     Serial.println("[SD] Error: Failed to open log file. SD card marked as OFFLINE.");
@@ -176,8 +176,8 @@ void writeFrameToFile(const char* filepath, const uint8_t* frame, size_t length,
 void loadLoRaConfig() {
   Preferences prefs;
   
-  // Ouvre le namespace "loracfg" en mode lecture/écriture
-  prefs.begin("loracfg", false);
+  // Ouvre le namespace "loracfg" en mode lecture seule pour plus de sécurité
+  prefs.begin("loracfg", true);
   
   // Lecture ou application des valeurs par défaut si non trouvées
   activeConfig.frequency = prefs.getFloat("freq", DEFAULT_FREQUENCY);

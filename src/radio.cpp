@@ -196,30 +196,32 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen, float *outRs
       return 0;
     }
 
-    rxCount++;
-    // Formatage compact sans espace et limitation à 3 chiffres (0-999) pour conserver de l'espace
-    uint32_t dispRx = rxCount % 1000;
-    uint32_t dispErr = errCount % 1000;
-    taskENTER_CRITICAL(&dispMux);
-    if (errCount == 0) {
-      snprintf(dispStatus, sizeof(dispStatus), "RX:%d", dispRx);
-    } else {
-      snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", dispRx, dispErr);
-    }
-    
     // Décodage du couple SSID et APID (Trame garantie NectarMC >= 3 octets)
     uint16_t id_mission = byteArr[1] | (byteArr[2] << 8);
     uint8_t apid = id_mission & 0x3F;
     uint8_t ssid_num = (id_mission >> 6) & 0xFF;
     uint8_t ssid_type = (id_mission >> 14) & 0x03;
+    const char* ssid_prefix = getSsidPrefix(ssid_type);
 
-    const char* ssid_prefix = "OTHER";
-    if (ssid_type == 0) ssid_prefix = "FX";
-    else if (ssid_type == 1) ssid_prefix = "MF";
-    else if (ssid_type == 2) ssid_prefix = "BALLOON";
-    else if (ssid_type == 3) ssid_prefix = "OTHER";
+    // Pré-formatage des chaînes de caractères hors section critique (Performance)
+    char tempStatus[32];
+    char tempSsidApid[32];
+    uint32_t nextRx = rxCount + 1;
+    uint32_t dispRx = nextRx % 1000;
+    uint32_t dispErr = errCount % 1000;
 
-    snprintf(dispSsidApid, sizeof(dispSsidApid), "%s%d (APID:%d)", ssid_prefix, ssid_num, apid);
+    if (errCount == 0) {
+      snprintf(tempStatus, sizeof(tempStatus), "RX:%d", dispRx);
+    } else {
+      snprintf(tempStatus, sizeof(tempStatus), "RX:%d E:%d", dispRx, dispErr);
+    }
+    snprintf(tempSsidApid, sizeof(tempSsidApid), "%s%d (APID:%d)", ssid_prefix, ssid_num, apid);
+
+    // Section critique ultra-rapide (copies mémoire directes)
+    taskENTER_CRITICAL(&dispMux);
+    rxCount++;
+    strcpy(dispStatus, tempStatus);
+    strcpy(dispSsidApid, tempSsidApid);
     
     // Horodatage de présence du tracker
     lastTrackerPacketTime[ssid_num] = millis();
