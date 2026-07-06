@@ -69,7 +69,7 @@ Les informations détaillées s'affichent sous forme de deux écrans alternant a
 Les données transitent sous le format standard **NectarMC** selon le canal de communication :
 
 *   **📡 Trames Radio LoRa (Bord → Station sol)** :
-    Chaque paquet commence par le Magic byte `0xEB` suivi de l'`Id_mission` encodé sur 16 bits en Little-Endian, qui encapsule le **SSID** (type de mission + numéro, 10 bits) et l'**APID** (identifiant applicatif, 6 bits). Un mécanisme de fallback détecte et convertit automatiquement les trames historiques sans Magic byte.
+    Chaque paquet commence obligatoirement par le Magic byte `0xEB` suivi de l'`Id_mission` encodé sur 16 bits en Little-Endian, qui encapsule le **SSID** (type de mission + numéro, 10 bits) et l'**APID** (identifiant applicatif, 6 bits). Toute trame ne commençant pas par `0xEB` ou de taille inférieure à 3 octets est rejetée.
 
 *   **💻 Trames Série NectarMC (Station sol → PC)** :
     Trames binaires encapsulées avec CRC16-CCITT, configurables via `AT+FMT=<0-3>` :
@@ -245,15 +245,36 @@ pio run -t upload
 > *   **Suivre les Trackers Actifs en temps réel** : La page liste automatiquement tous les émetteurs détectés (fusées, minifusées, ballons...) avec leurs types de mission, APID, nombre de trames et charges utiles. Elle détecte et marque automatiquement comme `PERDU` les trackers inactifs pendant plus de 15 secondes.
 > *   **Tracer le débit de données** : Un graphique SVG en temps réel affiche le flux instantané de données reçues.
 > *   **Flasher le firmware en ligne** : Mettez à jour le micrologiciel de votre carte TTGO avec la dernière version native (en 868 ou 433 MHz) directement en un clic depuis le navigateur grâce à `esptool-js`.
-> ### 2. Logiciel de Traitement & Visualisation 3D : NectarMC
-> La station sol est entièrement configurée pour transmettre les données de vol en temps réel vers le logiciel principal de visualisation de la télémétrie :
-> 👉 **[Découvrir NectarMC sur GitHub](https://github.com/mlavardin/NectarMC)**
 
 <p align="center">
    <img src="Image/NECTAR_WEB8CONTROL.png" width="600" />
    <br>
    <em>Vue du site web actuel de Nectar Rx Station Web Console</em>
 </p>
+
+> ### 2. Logiciel de Traitement & Visualisation 3D : NectarMC
+> La station sol est entièrement configurée pour transmettre les données de vol en temps réel vers le logiciel principal de visualisation de la télémétrie :
+> 👉 **[Découvrir NectarMC sur GitHub](https://github.com/mlavardin/NectarMC)**
+
+<p align="center">
+   <img src="Image/NECTAR-MC.png" width="600" />
+   <br>
+   <em>Vue du logiciel actuel de NectarMC avec reception de l'émetteur WASP</em>
+</p>
+
+---
+
+## Documentation Complète de l'Écosystème NectarMC
+
+| Document | Description |
+| :--- | :--- |
+| 👉 **[Guide des Formats de Trames](./FRAME_GUIDE.md)** | Structure des paquets LoRa (Air), des trames série NectarMC, et de la payload WASP de 32 octets. |
+| 👉 **[Guide de Contrôle d'Intégrité (CRC)](./CRC_GUIDE.md)** | Description des deux niveaux de CRC (Radio LoRa et Liaison Série USB/Bluetooth). |
+| 👉 **[Guide Complet des Commandes AT](./AT_GUIDE.md)** | Liste complète, formats et paramètres des commandes de configuration de la carte. |
+| 🌐 **[Nectar Rx Station Web Console](https://axpaul.github.io/Nectar-RxStation-LoRa32/)** | Interface web de pilotage USB, suivi des trackers en temps réel et flashage du firmware en ligne. |
+| 📡 **[Emetteur WASP-TX](https://github.com/axpaul/Wasp-TxTracker-TTGO)** | Logiciel pour tracker télémétrique LoRa (TTGO TBEAM) compatible avec NectarMC. |
+| 💻 **[NectarMC - Logiciel Sol](https://github.com/mlavardin/NectarMC)** | Logiciel de traitement, visualisation et enregistrement de la télémétrie (BDS, Grafana, InfluxDB). |
+| 📖 **[Guide BDS NectarMC](https://github.com/mlavardin/NectarMC/blob/master/DOCUMENTATION/FRAME_FORMAT.md)** | Définition du format de description des trames (Binary Data Scheme) pour la décommutation dans NectarMC. |
 
 ---
 
