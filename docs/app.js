@@ -1668,9 +1668,8 @@ function exportTelemetryToCSV() {
 async function flashFirmware() {
   const band = selectBand ? selectBand.value : '868';
   const fwVersion = selectFlashFwVersion ? selectFlashFwVersion.value : 'latest';
-  const binUrl = fwVersion === 'v1.3.1'
-    ? `binaries/firmware_bluetooth_${band}_v1.3.1.bin`
-    : `binaries/firmware_bluetooth_${band}.bin`;
+  const verTag = fwVersion === 'latest' ? 'v1.6.2' : fwVersion;
+  const binUrl = `binaries/firmware_bluetooth_${band}_${verTag}.bin`;
   
   if (isConnected) {
     alert(getTranslation('alert_monitor_active_disconnect'));
