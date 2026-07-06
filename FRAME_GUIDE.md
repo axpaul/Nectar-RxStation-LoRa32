@@ -42,8 +42,8 @@ Si le CRC matériel est désactivé (`AT+CRC=0`), l'émetteur calcule un CRC16 l
 └─────────────┴─────────────────────────────────────────────┴───────────────────┴───────────────────┘
 ```
 
-> [!NOTE]
-> **Compatibilité et Fallback** : Si la station sol reçoit une trame historique sans Magic byte `0xEB` (commençant directement par le `SSID_NUM` brut), l'ESP32 la détecte automatiquement et la convertit à la volée au format NectarMC standard.
+> [!WARNING]
+> **Validation stricte (v1.6.1)** : Toute trame ne commençant pas par le Magic byte `0xEB` ou de taille inférieure à 3 octets est **rejetée** par la station sol. Les trames historiques sans Magic byte ne sont plus acceptées.
 
 ---
 
