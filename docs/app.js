@@ -1718,7 +1718,7 @@ async function flashFirmware() {
     if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_chip', { chip: esploader.chipName });
     logToTerminal(getTranslation('log_download_bin', { url: binUrl }), "sys-out");
     
-    const response = await fetch(binUrl);
+    const response = await fetch(binUrl + '?t=' + Date.now());
     if (!response.ok) {
       throw new Error(getTranslation('log_download_bin_failed', { status: response.statusText }) || `Impossible de récupérer le binaire (${response.statusText})`);
     }
