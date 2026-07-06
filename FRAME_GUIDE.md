@@ -125,27 +125,27 @@ Lorsque la station sol a validé une trame radio, elle l'encapsule dans une tram
 
 Ces formats proposent un en-tête de **5 octets** intégrant l'octet `gs_flag` (Ground Station Flag) à l'index 3. Le footer s'adapte dynamiquement selon le masque de bits de `gs_flag`.
 
-* **Taille totale** : `5 + N + M + T + 3` octets
+* **Taille totale** : `5 + N + M + T + 2` octets
 
   Où `N` = taille payload, `M` = métadonnées RSSI/SNR (0 à 2 octets), `T` = Timestamp (0 ou 4 octets).
 
 ```
-┌───────────────────────────────────────────────────────────┬───────────────────┬───────────────────────────────────────┬─────────────────────────┐
-│                          HEADER                           │      PAYLOAD      │               METADATA                │     PACKET CONTROL      │
-├─────────────┬──────────────┬──────────────┬───────────────┼───────────────────┼───────────┬───────────┬───────────────┼───────────────┬─────────┤
-│   MAGIC     │  Id_mission  │   gs_flag    │ payload_size  │      N data       │   RSSI    │    SNR    │   Timestamp   │     CRC16     │ Newline │
-│   1 Byte    │   2 Bytes    │    1 Byte    │    1 Byte     │      bytes        │  (Option) │  (Option) │  (0 or 4 B)   │    2 Bytes    │ 1 Byte  │
-│    0xEB     │ (Little-End) │   (Bitmask)  │   (N bytes)   │                   │  1 Byte   │  1 Byte   │ (uint32_t LE) │ (Little-End)  │  0x0A   │
-└─────────────┴──────────────┴──────────────┴───────────────┴───────────────────┴───────────┴───────────┴───────────────┴───────────────┴─────────┘
+┌───────────────────────────────────────────────────────────┬───────────────────┬───────────────────────────────────────┬───────────────────────┐
+│                          HEADER                           │      PAYLOAD      │               METADATA                │    PACKET CONTROL     │
+├─────────────┬──────────────┬──────────────┬───────────────┼───────────────────┼───────────┬───────────┬───────────────┼───────────────────────┤
+│   MAGIC     │  Id_mission  │   gs_flag    │ payload_size  │      N data       │   RSSI    │    SNR    │   Timestamp   │         CRC16         │
+│   1 Byte    │   2 Bytes    │    1 Byte    │    1 Byte     │      bytes        │  (Option) │  (Option) │  (0 or 4 B)   │        2 Bytes        │
+│    0xEB     │ (Little-End) │   (Bitmask)  │   (N bytes)   │                   │  1 Byte   │  1 Byte   │ (uint32_t LE) │     (Little-Endian)   │
+└─────────────┴──────────────┴──────────────┴───────────────┴───────────────────┴───────────┴───────────┴───────────────┴───────────────────────┘
 ```
 
 #### Les trois configurations de GSFLAG :
 
 | Format | Commande AT | `gs_flag` | RSSI | SNR | Timestamp | Taille totale |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
-| **2** *(défaut)* | `AT+FMT=2` | `0x03` | ✅ 1B | ✅ 1B | ❌ | `9 + N` |
-| **1** | `AT+FMT=1` | `0x3F` | ✅ 1B | ✅ 1B | ✅ 4B | `13 + N` |
-| **3** | `AT+FMT=3` | `0x00` | ❌ | ❌ | ❌ | `8 + N` |
+| **2** *(défaut)* | `AT+FMT=2` | `0x03` | ✅ 1B | ✅ 1B | ❌ | `8 + N` |
+| **1** | `AT+FMT=1` | `0x3F` | ✅ 1B | ✅ 1B | ✅ 4B | `12 + N` |
+| **3** | `AT+FMT=3` | `0x00` | ❌ | ❌ | ❌ | `7 + N` |
 
 ### gs_flag (Byte 3)
 
@@ -184,7 +184,6 @@ Nombre d'octets de la payload qui suit. Le parseur lit exactement ce nombre d'oc
 | **5+N+M₁** | `int8_t` | `SNR` | *(si bit 1 de gs_flag)* SNR en quarts de dB. |
 | **5+N+M₁+M₂** | `uint32_t` | `Timestamp` | *(si bits 2–5 de gs_flag)* Epoch Unix LE (4 octets). |
 | **5+N+M₁+M₂+T** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian (2 octets). Calculé sur tous les octets précédents (index 0 à `4+N+M₁+M₂+T`). |
-| **7+N+M₁+M₂+T** | `char` | `Newline` | Terminaison de trame `\n` (`0x0A`). |
 
 > Où `M₁` = 1 si RSSI présent, 0 sinon. `M₂` = 1 si SNR présent, 0 sinon. `T` = 4 si Timestamp présent, 0 sinon.
 
@@ -193,16 +192,16 @@ Nombre d'octets de la payload qui suit. Le parseur lit exactement ce nombre d'oc
 ### B. Format sans GSFLAG (Format 0 — Historique v1.3.1)
 
 Ce format binaire minimaliste n'inclut ni `gs_flag`, ni métadonnée réseau. Son en-tête fait **4 octets**.
-* **Taille totale** : `7 + N` octets.
+* **Taille totale** : `6 + N` octets.
 
 ```
-┌───────────────────────────────────────────┬───────────────────┬─────────────────────────┐
-│                  HEADER                   │      PAYLOAD      │     PACKET CONTROL      │
-├─────────────┬──────────────┬──────────────┼───────────────────┼───────────────┬─────────┤
-│   MAGIC     │  Id_mission  │ payload_size │      N data       │     CRC16     │ Newline │
-│   1 Byte    │   2 Bytes    │   1 Byte     │      bytes        │    2 Bytes    │ 1 Byte  │
-│    0xEB     │ (Little-End) │   (N bytes)  │                   │ (Little-End)  │  0x0A   │
-└─────────────┴──────────────┴──────────────┴───────────────────┴───────────────┴─────────┘
+┌───────────────────────────────────────────┬───────────────────┬───────────────────────┐
+│                  HEADER                   │      PAYLOAD      │    PACKET CONTROL     │
+├─────────────┬──────────────┬──────────────┼───────────────────┼───────────────────────┤
+│   MAGIC     │  Id_mission  │ payload_size │      N data       │         CRC16         │
+│   1 Byte    │   2 Bytes    │   1 Byte     │      bytes        │        2 Bytes        │
+│    0xEB     │ (Little-End) │   (N bytes)  │                   │     (Little-Endian)   │
+└─────────────┴──────────────┴──────────────┴───────────────────┴───────────────────────┘
 ```
 
 ### Description détaillée des octets (Format 0) :
@@ -214,7 +213,6 @@ Ce format binaire minimaliste n'inclut ni `gs_flag`, ni métadonnée réseau. So
 | **3** | `uint8_t` | `payload_size` | Longueur `N` de la charge utile LoRa brute. |
 | **4 à 3+N** | `uint8_t[]` | `Payload` | Données brutes LoRa (`N` octets). |
 | **4+N à 5+N** | `uint16_t` | `CRC16` | CRC16-CCITT Little-Endian sur les octets 0 à `3+N`. |
-| **6+N** | `char` | `Newline` | Retour à la ligne `\n` (`0x0A`). |
 
 ---
 
@@ -230,13 +228,14 @@ Si l'utilisateur souhaite décommuter la payload (et non simplement la stocker e
 
 Pour s'assurer que vos parseurs côté PC fonctionnent correctement, voici le récapitulatif des versions et l'impact sur le format des trames :
 
-| Version | Format AT+FMT | Taille Trame Série | En-tête / Métadonnées |
+| Version | Format AT+FMT | Taille Trame Série | En-tête / Métadonnées / Fin |
 | :---: | :---: | :---: | :--- |
-| **v1.6.1 (Actuelle)** | `AT+FMT=2` (Par défaut) | `9 + N` | Header 5 octets (`gs_flag = 0x03`). RSSI + SNR. Pas de Timestamp. |
-| | `AT+FMT=1` | `13 + N` | Header 5 octets (`gs_flag = 0x3F`). RSSI + SNR + Timestamp (4B). |
-| | `AT+FMT=3` | `8 + N` | Header 5 octets (`gs_flag = 0x00`). Aucune métadonnée. |
-| | `AT+FMT=0` | `7 + N` | Header 4 octets (sans `gs_flag`). Format historique v1.3.1. |
-| **v1.3.1** | — | `7 + N` | Header 4 octets. Aucun champ supplémentaire. |
+| **v1.6.2 (Actuelle)** | `AT+FMT=2` (Par défaut) | `8 + N` | Header 5 octets (`gs_flag = 0x03`). RSSI + SNR. Pas de Newline `\n`. |
+| | `AT+FMT=1` | `12 + N` | Header 5 octets (`gs_flag = 0x3F`). RSSI + SNR + Timestamp (4B). Pas de Newline `\n`. |
+| | `AT+FMT=3` | `7 + N` | Header 5 octets (`gs_flag = 0x00`). Aucune métadonnée. Pas de Newline `\n`. |
+| | `AT+FMT=0` | `6 + N` | Header 4 octets (sans `gs_flag`). Format historique. Pas de Newline `\n`. |
+| **v1.6.1** | (Formats 0-3) | `Taille v1.6.2 + 1` | Identique à v1.6.2 mais se terminait par Newline `\n` (`0x0A`). |
+| **v1.3.1** | — | `7 + N` | Header 4 octets. Aucun champ supplémentaire. Terminé par Newline `\n`. |
 
 ---
 

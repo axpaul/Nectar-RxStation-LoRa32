@@ -1,7 +1,7 @@
 /**
  * @file test_crc.cpp
  * @brief Tests unitaires sur cible avec la bibliothèque Unity (CRC, ADC, piles FreeRTOS).
- * @version 1.6.1
+ * @version 1.6.2
  * @author Paul Miailhe
  * @date 27/06/2026
  */

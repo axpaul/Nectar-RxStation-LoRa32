@@ -1,4 +1,4 @@
-# Guide Complet des Commandes AT — Nectar RX Station v1.6.1
+# Guide Complet des Commandes AT — Nectar RX Station v1.6.2
 
 Ce document détaille toutes les commandes AT disponibles sur le récepteur Nectar RX Station. 
 
@@ -40,7 +40,7 @@ Les commandes peuvent être envoyées via la **liaison série USB** (115200 baud
 
 ### `AT+INFO` ou `AT+VER`
 *   **Rôle** : Interroge l'identification de la station et sa version de firmware.
-*   **Format de réponse** : `+INFO: NECTAR RX STATION,FW=1.6.1,Band=<bande>` (où bande = `868` or `433`).
+*   **Format de réponse** : `+INFO: NECTAR RX STATION,FW=1.6.2,Band=<bande>` (où bande = `868` or `433`).
 
 ### `AT+CFG` ou `AT+STATUS`
 *   **Rôle** : Affiche un rapport complet de diagnostic de l'état actuel de la station.

@@ -1,5 +1,5 @@
 ================================================================================
-          LISTE DES COMMANDES AT DISPONIBLES — NECTAR RX STATION v1.6.1
+          LISTE DES COMMANDES AT DISPONIBLES — NECTAR RX STATION v1.6.2
 ================================================================================
 
 1. COMMANDES SYSTÈME ET DIAGNOSTIC
@@ -7,7 +7,7 @@
 AT                  : Teste la liaison de communication. Renvoie "OK".
 AT+HELP (ou AT?)    : Affiche la liste d'aide de toutes les commandes AT.
 AT+INFO (ou AT+VER) : Interroge l'identification de la station et sa version.
-                      Format de réponse : "+INFO: NECTAR RX STATION,FW=1.6.1,Band=<native>"
+                      Format de réponse : "+INFO: NECTAR RX STATION,FW=1.6.2,Band=<native>"
 AT+CFG (ou AT+STATUS): Affiche la configuration détaillée de la station LoRa
                       (version, bande native, fréquence, SF, BW, statut CRC,
                       carte SD, statut Bluetooth, et mémoire libre des tâches).

@@ -57,7 +57,7 @@ const i18n = {
     badge_disconnected: "Déconnecté",
     badge_connected: "Connecté",
     header_title: "NECTAR RX STATION",
-    header_subtitle: "Web Control Center v1.6.1",
+    header_subtitle: "Web Control Center v1.6.2",
     conn_title: "🔌 Liaison Série USB",
     maintenance_title: "🛠️ Outils & Maintenance",
     sd_title: "📁 Journaux Carte SD",
@@ -134,14 +134,14 @@ const i18n = {
     stats_count: "Trames (Reçues / KO)",
     stats_crc_errors: "Erreurs CRC",
     flash_title: "⚡ Mise à Jour Firmware",
-    flash_desc: "Flashez directement la version <strong>v1.6.1</strong> depuis votre navigateur par port USB.",
+    flash_desc: "Flashez directement la version <strong>v1.6.2</strong> depuis votre navigateur par port USB.",
     flash_version: "Version du Firmware :",
-    flash_version_latest: "Dernière version (v1.6.1)",
+    flash_version_latest: "Dernière version (v1.6.2)",
     flash_version_131: "Version historique (v1.3.1)",
     flash_band: "Bande Radio native de la carte :",
     flash_band_868: "868 MHz (Europe)",
     flash_band_433: "433 MHz",
-    flash_btn_flash: "Flasher la carte (v1.6.1)",
+    flash_btn_flash: "Flasher la carte (v1.6.2)",
     flash_status_label: "Statut :",
     flash_status_waiting: "Attente...",
     trackers_title: "🛸 Émetteurs Détectés (Active Trackers)",
@@ -215,7 +215,7 @@ const i18n = {
     badge_disconnected: "Disconnected",
     badge_connected: "Connected",
     header_title: "NECTAR RX STATION",
-    header_subtitle: "Web Control Center v1.6.1",
+    header_subtitle: "Web Control Center v1.6.2",
     conn_title: "🔌 USB Serial Link",
     maintenance_title: "🛠️ Tools & Maintenance",
     sd_title: "📁 SD Card Logs",
@@ -292,11 +292,11 @@ const i18n = {
     stats_count: "Frames (Received / KO)",
     stats_crc_errors: "CRC Errors",
     flash_title: "⚡ Firmware Update",
-    flash_desc: "Flash version <strong>v1.6.1</strong> directly from your browser via USB port.",
+    flash_desc: "Flash version <strong>v1.6.2</strong> directly from your browser via USB port.",
     flash_version: "Firmware Version:",
-    flash_version_latest: "Latest version (v1.6.1)",
+    flash_version_latest: "Latest version (v1.6.2)",
     flash_version_131: "Historical version (v1.3.1)",
-    flash_btn_flash: "Flash Board (v1.6.1)",
+    flash_btn_flash: "Flash Board (v1.6.2)",
     flash_band: "Board's native Radio Band:",
     flash_band_868: "868 MHz (Europe)",
     flash_band_433: "433 MHz",
@@ -437,7 +437,7 @@ function setLanguage(lang) {
 
 function updateFlashTexts() {
   const fwVersion = selectFlashFwVersion ? selectFlashFwVersion.value : 'latest';
-  const verStr = fwVersion === 'v1.3.1' ? 'v1.3.1' : 'v1.6.1';
+  const verStr = fwVersion === 'v1.3.1' ? 'v1.3.1' : 'v1.6.2';
   
   // Mettre à jour la description
   const descEl = document.querySelector('[data-i18n="flash_desc"]');

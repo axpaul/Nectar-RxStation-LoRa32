@@ -1,11 +1,11 @@
 /**
  * @file serial.cpp
  * @brief Gestion de la liaison série USB et Bluetooth pour l'envoi des trames NectarMC.
- * @version 1.6.1
+ * @version 1.6.2
  * @author Paul Miailhe
  * @date 27/06/2026
  * 
- * Version 1.6.1 : Refactorisation multitâche dual-core (FreeRTOS) et écran OLED séparé.
+ * Version 1.6.2 : Alignement RF et suppression du saut de ligne série pour NectarMC.
  */
 
 #include "header.h"
@@ -113,7 +113,6 @@ void sendNectarFrame(const uint8_t *header_bytes, const uint8_t *payload, size_t
         uint16_t crc = calculate_crc16(frame, frameIndex);
         frame[frameIndex++] = crc & 0xFF;
         frame[frameIndex++] = (crc >> 8) & 0xFF;
-        frame[frameIndex++] = '\n';
     }
     else {
         // --- FORMAT SANS GSFLAG (Original - v1.3.1 / master) ---
@@ -131,7 +130,6 @@ void sendNectarFrame(const uint8_t *header_bytes, const uint8_t *payload, size_t
         uint16_t crc = calculate_crc16(frame, frameIndex);
         frame[frameIndex++] = crc & 0xFF;
         frame[frameIndex++] = (crc >> 8) & 0xFF;
-        frame[frameIndex++] = '\n';
     }
 
     // 4. Émettre la trame complète en un seul appel (Série USB)

@@ -1,19 +1,19 @@
 /**
  * @file header.h
  * @brief Fichier d'en-tête global pour le projet Nectar-RxStation-LoRa32.
- * @version 1.6.1
+ * @version 1.6.2
  * @author Paul Miailhe
  * @date 27/06/2026
  * 
  * Contient les définitions des broches, les structures de données,
  * les paramètres de configuration native, et les déclarations de fonctions.
- * Version 1.6.1 : Refactorisation multitâche dual-core (FreeRTOS) et écran OLED séparé.
+ * Version 1.6.2 : Alignement RF et suppression du saut de ligne série pour NectarMC.
  */
 
 #ifndef HEADER_H
 #define HEADER_H
 
-#define FW_VERSION "1.6.1"
+#define FW_VERSION "1.6.2"
 
 #include <Arduino.h>
 #include <SPI.h>

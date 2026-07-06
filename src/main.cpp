@@ -1,7 +1,7 @@
 /**
  * @file main.cpp
  * @brief Point d'entrée principal du récepteur au sol Nectar-RxStation-LoRa32.
- * @version 1.6.1
+ * @version 1.6.2
  * @author Paul Miailhe
  * @date 27/06/2026
  * 
@@ -9,7 +9,7 @@
  * traite les interruptions LoRa, écrit les trames sur carte SD au format CSV
  * et les transmet en USB/Bluetooth au protocole binaire NectarMC.
  * Gère également la configuration dynamique par commandes AT.
- * Version 1.6.1 : Refactorisation multitâche dual-core (FreeRTOS) et écran OLED séparé.
+ * Version 1.6.2 : Alignement RF et suppression du saut de ligne série pour NectarMC.
  */
 
 #include "header.h"

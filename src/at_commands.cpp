@@ -1,11 +1,11 @@
 /**
  * @file at_commands.cpp
  * @brief Gestion de l'analyse, du décodage et de l'application des commandes AT.
- * @version 1.6.1
+ * @version 1.6.2
  * @author Paul Miailhe
  * @date 27/06/2026
  * 
- * Version 1.6.1 : Refactorisation multitâche dual-core (FreeRTOS) et écran OLED séparé.
+ * Version 1.6.2 : Alignement RF et suppression du saut de ligne série pour NectarMC.
  */
 
 #include "header.h"
