@@ -42,8 +42,8 @@ Si le CRC matériel est désactivé (`AT+CRC=0`), l'émetteur calcule un CRC16 l
 └─────────────┴─────────────────────────────────────────────┴─────────────┴───────────────────┴───────────────────┘
 ```
 
-> [!WARNING]
-> **Validation stricte (v1.6.1)** : Toute trame ne commençant pas par le Magic byte `0xEB`, de taille inférieure à 4 octets, ou ayant un décalage de taille de charge utile (`payload_size`) incorrect est **rejetée** par la station sol. Les trames historiques sans Magic byte ne sont plus acceptées.
+> [!TIP]
+> **Recommandation CRC** : Il est vivement conseillé d'utiliser le CRC matériel (Option A) géré en silicium par la puce radio SX1276 pour le contrôle de paquet LoRa. Cela libère des ressources de calcul sur le tracker et le récepteur par rapport à un contrôle de paquet géré par logiciel (Option B).
 
 ---
 
