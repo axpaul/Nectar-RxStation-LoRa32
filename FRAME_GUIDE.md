@@ -15,39 +15,39 @@ Une trame NectarMC côté bord est composée de trois blocs contigus : **Header*
 ### Option A : CRC matériel (Recommandé & Par défaut)
 
 Le contrôle d'intégrité est pris en charge directement par le silicium de la puce SX1276. Le paquet LoRa ne contient que le Header et la Payload.
-* **Taille totale** : `3 + N` octets (où `N` est la taille des données utiles).
+* **Taille totale** : `4 + N` octets (où `N` est la taille des données utiles).
 
 ```
-┌───────────────────────────────────────────────────────────┬───────────────────┐
-│                          HEADER                           │      PAYLOAD      │
-├─────────────┬─────────────────────────────────────────────┼───────────────────┤
-│   MAGIC     │                 Id_mission                  │      N data       │
-│   1 Byte    │                  2 Bytes                    │       bytes       │
-│    0xEB     │         (SSID & APID Little-Endian)         │     (N bytes)     │
-└─────────────┴─────────────────────────────────────────────┴───────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┬───────────────────┐
+│                                 HEADER                                  │      PAYLOAD      │
+├─────────────┬─────────────────────────────────────────────┬─────────────┼───────────────────┤
+│   MAGIC     │                 Id_mission                  │payload_size │      N data       │
+│   1 Byte    │                  2 Bytes                    │   1 Byte    │       bytes       │
+│    0xEB     │         (SSID & APID Little-Endian)         │ (valeur N)  │     (N bytes)     │
+└─────────────┴─────────────────────────────────────────────┴─────────────┴───────────────────┘
 ```
 
 ### Option B : CRC logiciel (Si le CRC matériel est désactivé)
 
 Si le CRC matériel est désactivé (`AT+CRC=0`), l'émetteur calcule un CRC16 logiciel et l'ajoute en queue de payload. L'ESP32 de la station sol le vérifie avant de valider le paquet.
-* **Taille totale** : `5 + N` octets.
+* **Taille totale** : `6 + N` octets.
 
 ```
-┌───────────────────────────────────────────────────────────┬───────────────────┬───────────────────┐
-│                          HEADER                           │      PAYLOAD      │  PACKET CONTROL   │
-├─────────────┬─────────────────────────────────────────────┼───────────────────┼───────────────────┤
-│   MAGIC     │                 Id_mission                  │      N data       │       CRC16       │
-│   1 Byte    │                  2 Bytes                    │       bytes       │      2 Bytes      │
-│    0xEB     │         (SSID & APID Little-Endian)         │     (N bytes)     │    (Software)     │
-└─────────────┴─────────────────────────────────────────────┴───────────────────┴───────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┬───────────────────┬───────────────────┐
+│                                 HEADER                                  │      PAYLOAD      │  PACKET CONTROL   │
+├─────────────┬─────────────────────────────────────────────┬─────────────┼───────────────────┼───────────────────┤
+│   MAGIC     │                 Id_mission                  │payload_size │      N data       │       CRC16       │
+│   1 Byte    │                  2 Bytes                    │   1 Byte    │       bytes       │      2 Bytes      │
+│    0xEB     │         (SSID & APID Little-Endian)         │ (valeur N)  │     (N bytes)     │    (Software)     │
+└─────────────┴─────────────────────────────────────────────┴─────────────┴───────────────────┴───────────────────┘
 ```
 
 > [!WARNING]
-> **Validation stricte (v1.6.1)** : Toute trame ne commençant pas par le Magic byte `0xEB` ou de taille inférieure à 3 octets est **rejetée** par la station sol. Les trames historiques sans Magic byte ne sont plus acceptées.
+> **Validation stricte (v1.6.1)** : Toute trame ne commençant pas par le Magic byte `0xEB`, de taille inférieure à 4 octets, ou ayant un décalage de taille de charge utile (`payload_size`) incorrect est **rejetée** par la station sol. Les trames historiques sans Magic byte ne sont plus acceptées.
 
 ---
 
-## Header (3 bytes)
+## Header (4 bytes)
 
 ### Magic byte (Byte 0)
 
@@ -99,14 +99,19 @@ L'**APID** ou **Application Process Identifier** identifie le type de trame au s
 
 Le router NectarMC utilise la paire `(SSID, APID)` comme clé pour acheminer la trame vers la bonne décom.
 
+### payload_size (Byte 3)
+
+Ce champ est codé par un `uint8_t`. Il contient le nombre d'octets `N` de la charge utile (payload) qui suit immédiatement.
+
 ### Description des octets de la trame radio
 
 | Index | Type | Champ | Description |
 | :---: | :---: | :--- | :--- |
 | **0** | `uint8_t` | `MAGIC` | Octet de synchronisation. Vaut toujours `0xEB`. |
 | **1–2** | `uint16_t` | `Id_mission` | Identifiant de mission Little-Endian. Encode SSID (10 bits) et APID (6 bits). |
-| **3 à 2+N** | `uint8_t[]` | `Payload` | Charge utile contenant les données brutes des capteurs (`N` octets). |
-| **3+N à 4+N** | `uint16_t` | `CRC16` | *(Option B uniquement)* CRC16 logiciel Little-Endian sur les octets 0 à `2+N`. |
+| **3** | `uint8_t` | `payload_size` | Longueur `N` de la charge utile (payload). |
+| **4 à 3+N** | `uint8_t[]` | `Payload` | Charge utile contenant les données brutes des capteurs (`N` octets). |
+| **4+N à 5+N** | `uint16_t` | `CRC16` | *(Option B uniquement)* CRC16 logiciel Little-Endian sur les octets 0 à `3+N`. |
 
 ---
 

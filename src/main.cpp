@@ -196,8 +196,8 @@ void vRadioRxTask(void *pvParameters) {
         xSemaphoreGive(radioMutex);
       }
 
-      // Si le paquet est valide (trame minimale de 3 octets : SSID, APID, Type)
-      if (len >= 3) {
+      // Si le paquet est valide (trame minimale de 4 octets : SSID, APID, Type, Payload Size)
+      if (len >= 4) {
         LoRaPacket packet;
         memcpy(packet.data, rxBuffer, len);
         packet.length = len;
@@ -232,8 +232,8 @@ void vIOProcessingTask(void *pvParameters) {
     if (xQueueReceive(rxQueue, &packet, portMAX_DELAY) == pdTRUE) {
       
       // 1. Transmission binaire NectarMC (USB et Bluetooth)
-      const uint8_t* payload = &packet.data[3];
-      size_t payload_len = packet.length - 3;
+      const uint8_t* payload = &packet.data[4];
+      size_t payload_len = packet.data[3];
       sendNectarFrame(packet.data, payload, payload_len, packet.rssi, packet.snr);
 
       // 2. Enregistrement sur la carte SD si elle est disponible

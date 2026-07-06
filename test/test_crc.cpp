@@ -89,7 +89,7 @@ void test_mission_id_encoding_decoding() {
 
 // Helper pour simuler la validation stricte NectarMC sous test
 bool validate_nectarmc_frame(const uint8_t *byteArr, size_t length) {
-    if (length < 3 || byteArr[0] != 0xEB) {
+    if (length < 4 || byteArr[0] != 0xEB || byteArr[3] != (length - 4)) {
         return false;
     }
     return true;
@@ -113,17 +113,21 @@ TestDecodedMission decode_nectarmc_mission(const uint8_t *byteArr) {
 
 // Test de la validation stricte NectarMC (Rejet et acceptation de trames)
 void test_nectarmc_strict_validation() {
-    // 1. Trame valide standard NectarMC
-    const uint8_t valid_frame[] = {0xEB, 0xC1, 0x01, 0x44, 0x55};
+    // 1. Trame valide standard NectarMC (payload_size = 1)
+    const uint8_t valid_frame[] = {0xEB, 0xC1, 0x01, 0x01, 0x44};
     TEST_ASSERT_TRUE(validate_nectarmc_frame(valid_frame, 5));
 
-    // 2. Trame trop courte (moins de 3 octets)
-    const uint8_t short_frame[] = {0xEB, 0x01};
-    TEST_ASSERT_FALSE(validate_nectarmc_frame(short_frame, 2));
+    // 2. Trame trop courte (moins de 4 octets)
+    const uint8_t short_frame[] = {0xEB, 0xC1, 0x01};
+    TEST_ASSERT_FALSE(validate_nectarmc_frame(short_frame, 3));
 
     // 3. Trame avec un mauvais Magic Byte (ex: 0xAA)
-    const uint8_t bad_magic_frame[] = {0xAA, 0xC1, 0x01, 0x44, 0x55};
+    const uint8_t bad_magic_frame[] = {0xAA, 0xC1, 0x01, 0x01, 0x44};
     TEST_ASSERT_FALSE(validate_nectarmc_frame(bad_magic_frame, 5));
+
+    // 4. Trame avec un mauvais payload_size
+    const uint8_t bad_size_frame[] = {0xEB, 0xC1, 0x01, 0x99, 0x44};
+    TEST_ASSERT_FALSE(validate_nectarmc_frame(bad_size_frame, 5));
 }
 
 // Test du décodage SSID/APID simplifié

@@ -126,7 +126,7 @@ float readBatteryVoltage() {
  * @return Taille du paquet reçu en octets, ou 0 en cas d'absence de paquet ou d'erreur.
  * 
  * Cette fonction vérifie si le drapeau d'interruption a été activé. Elle désactive les interrupts,
- * lit les données reçues, décode le SSID et l'APID de la trame (si sa taille >= 3 octets),
+ * lit les données reçues, décode le SSID et l'APID de la trame (si sa taille >= 4 octets),
  * met à jour les indicateurs physiques de signal (RSSI, SNR), actualise l'afficheur OLED,
  * puis réactive l'écoute continue du composant radio.
  */
@@ -145,11 +145,11 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen, float *outRs
   if (state == RADIOLIB_ERR_NONE) {
     // Si le CRC matériel est désactivé (Option B), on vérifie le CRC logiciel avant de valider la trame
     if (!activeConfig.crcEnable) {
-      if (length < 5) {
+      if (length < 6) {
         errCount++;
         taskENTER_CRITICAL(&dispMux);
         snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", rxCount % 1000, errCount % 1000);
-        strcpy(dispSsidApid, "Invalid size (<5B)");
+        strcpy(dispSsidApid, "Invalid size (<6B)");
         displayNeedsUpdate = true;
         taskEXIT_CRITICAL(&dispMux);
         *outRssi = 0;
@@ -182,12 +182,13 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen, float *outRs
     float localRssi = radio->getRSSI();
     float localSnr = radio->getSNR();
 
-    // Validation stricte du format NectarMC (Magic Byte 0xEB et taille minimale de 3 octets)
-    if (length < 3 || byteArr[0] != NECTAR_MAGIC) {
+    // Validation stricte du format NectarMC :
+    // 1. Vérification de la taille minimale (4 octets : MAGIC, ID_MISSION, payload_size)
+    if (length < 4) {
       errCount++;
       taskENTER_CRITICAL(&dispMux);
       snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", rxCount % 1000, errCount % 1000);
-      strcpy(dispSsidApid, "Bad Magic/Size");
+      strcpy(dispSsidApid, "Invalid size (<4B)");
       displayNeedsUpdate = true;
       taskEXIT_CRITICAL(&dispMux);
       *outRssi = 0;
@@ -196,7 +197,35 @@ size_t RadioReceive(SX1276 *radio, uint8_t* byteArr, size_t maxLen, float *outRs
       return 0;
     }
 
-    // Décodage du couple SSID et APID (Trame garantie NectarMC >= 3 octets)
+    // 2. Vérification du Magic Byte
+    if (byteArr[0] != NECTAR_MAGIC) {
+      errCount++;
+      taskENTER_CRITICAL(&dispMux);
+      snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", rxCount % 1000, errCount % 1000);
+      strcpy(dispSsidApid, "Bad Magic Byte");
+      displayNeedsUpdate = true;
+      taskEXIT_CRITICAL(&dispMux);
+      *outRssi = 0;
+      *outSnr = 0;
+      RadioStartListen(radio);
+      return 0;
+    }
+
+    // 3. Vérification de la cohérence de taille (payload_size vs longueur réelle)
+    if (byteArr[3] != (length - 4)) {
+      errCount++;
+      taskENTER_CRITICAL(&dispMux);
+      snprintf(dispStatus, sizeof(dispStatus), "RX:%d E:%d", rxCount % 1000, errCount % 1000);
+      strcpy(dispSsidApid, "Size Mismatch");
+      displayNeedsUpdate = true;
+      taskEXIT_CRITICAL(&dispMux);
+      *outRssi = 0;
+      *outSnr = 0;
+      RadioStartListen(radio);
+      return 0;
+    }
+
+    // Décodage du couple SSID et APID (Trame garantie NectarMC >= 4 octets)
     uint16_t id_mission = byteArr[1] | (byteArr[2] << 8);
     uint8_t apid = id_mission & 0x3F;
     uint8_t ssid_num = (id_mission >> 6) & 0xFF;
