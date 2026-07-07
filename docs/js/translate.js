@@ -1,3 +1,8 @@
+/**
+ * @file translate.js
+ * @brief Gestion de la localisation (FR/EN) et des éléments textuels du DOM.
+ */
+
 export const translations = {
   fr: {
     badge_disconnected: "Déconnecté",
@@ -317,10 +322,92 @@ export const translations = {
   }
 };
 
-export function getTranslation(key, replacements = {}, lang = 'fr') {
+/**
+ * Traduit une clé en lui injectant des variables dynamiques.
+ * @param {string} key Clé de traduction.
+ * @param {Object} replacements Remplacements (ex: { name: "FX3" }).
+ * @param {string} lang Langue cible ('fr' ou 'en').
+ */
+export function getTranslation(key, replacements = {}, lang = localStorage.getItem('nectar_lang') || 'fr') {
   let text = translations[lang]?.[key] || translations['fr']?.[key] || key;
   for (const [placeholder, value] of Object.entries(replacements)) {
     text = text.replace(`{${placeholder}}`, value);
   }
   return text;
 }
+
+/**
+ * Met à jour dynamiquement le DOM avec la langue fournie et dispatche un événement global.
+ * @param {string} lang Langue à appliquer ('fr' ou 'en').
+ */
+export function updateLanguage(lang) {
+  if (lang !== 'fr' && lang !== 'en') {
+    lang = 'fr';
+  }
+  localStorage.setItem('nectar_lang', lang);
+  
+  // 1. Remplacer les textes des balises avec data-i18n
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const key = el.getAttribute('data-i18n');
+    if (translations[lang] && translations[lang][key]) {
+      if (translations[lang][key].includes('<') && translations[lang][key].includes('>')) {
+        el.innerHTML = translations[lang][key];
+      } else {
+        el.textContent = translations[lang][key];
+      }
+    }
+  });
+
+  // 2. Remplacer les placeholders
+  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+    const key = el.getAttribute('data-i18n-placeholder');
+    if (translations[lang] && translations[lang][key]) {
+      el.placeholder = translations[lang][key];
+    }
+  });
+
+  // 3. Remplacer les attributs title
+  document.querySelectorAll('[data-i18n-title]').forEach(el => {
+    const key = el.getAttribute('data-i18n-title');
+    if (translations[lang] && translations[lang][key]) {
+      el.title = translations[lang][key];
+    }
+  });
+
+  // 4. Mettre à jour l'apparence des boutons de langue
+  const btnFr = document.getElementById('btn-lang-fr');
+  const btnEn = document.getElementById('btn-lang-en');
+  if (btnFr && btnEn) {
+    if (lang === 'fr') {
+      btnFr.classList.add('active');
+      btnEn.classList.remove('active');
+    } else {
+      btnEn.classList.add('active');
+      btnFr.classList.remove('active');
+    }
+  }
+
+  // 5. Envoyer l'événement personnalisé pour notifier les autres modules
+  window.dispatchEvent(new CustomEvent('lang-changed', { detail: lang }));
+}
+
+// Auto-liaison des événements de langues au chargement du DOM
+document.addEventListener('DOMContentLoaded', () => {
+  const btnLangFr = document.getElementById('btn-lang-fr');
+  const btnLangEn = document.getElementById('btn-lang-en');
+  if (btnLangFr) btnLangFr.addEventListener('click', () => updateLanguage('fr'));
+  if (btnLangEn) btnLangEn.addEventListener('click', () => updateLanguage('en'));
+
+  // Langue initiale
+  const savedLang = localStorage.getItem('nectar_lang');
+  if (savedLang) {
+    updateLanguage(savedLang);
+  } else {
+    const browserLang = navigator.language || navigator.userLanguage;
+    if (browserLang && browserLang.startsWith('en')) {
+      updateLanguage('en');
+    } else {
+      updateLanguage('fr');
+    }
+  }
+});

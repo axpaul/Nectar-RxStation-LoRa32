@@ -1,257 +1,13 @@
-import { ESPLoader, Transport } from 'https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm';
+/**
+ * @file app.js
+ * @brief Point d'entrée principal et orchestrateur de l'interface (NectarApp).
+ * Version modulaire et orientée objet ES6.
+ */
+
+import { NectarSerial } from './serial.js';
 import { NectarMap } from './map.js';
-import { getTranslation, translations } from './translate.js';
-
-// ============================================================================
-// Variables Globales
-// ============================================================================
-let port = null;
-let reader = null;
-let inputWriter = null;
-let isConnected = false;
-let rxBuffer = [];
-let packetIndex = 0;
-let crcErrorsCount = 0;
-let readLoopPromise = null; // Promesse pour suivre la fin de la boucle de lecture
-let activeTrackers = {};    // Dictionnaire des émetteurs détectés : { name: { typeLabelKey, lastApid, packetCount, lastSeen, lastPayloadHex } }
-let allReceivedFrames = []; // Historique complet pour export CSV (capé à 5000 trames)
-
-// Variables pour le téléchargement de logs depuis la carte SD
-let isDownloadingSdFile = false;
-let sdDownloadFilename = '';
-let sdDownloadSize = 0;
-let sdDownloadBuffer = [];
-let sdDownloadLinesCount = 0;
-
-// Variables pour le calcul de débit et le graphique
-let bytesCountThisSecond = 0;
-let lastThroughputCalculation = Date.now();
-const throughputHistory = Array(30).fill(0); // 30 points pour 30 secondes
-
-// Variables de configuration active de la carte
-let currentConfig = {
-  frequency: 869.525,
-  sf: 8,
-  bw: 250.0
-};
-
-// Variable globale pour stocker le nom du port et la langue
-let currentPortName = '';
-let currentLang = 'fr';
-
-// Historique pour les graphiques RSSI/SNR
-const maxChartPoints = 30;
-const rssiHistory = []; // { value, time }
-const snrHistory = [];  // { value, time }
-
-// Variables globales pour la télémétrie WASP et la carte Leaflet
-let waspMap = new NectarMap('wasp-map');
-let waspTrackersData = {}; // Dictionnaire des données WASP reçues par tracker (ex: { "FX3": { alt, spd, ... } })
-let activeWaspTrackerName = ""; // Nom de l'émetteur WASP actuellement sélectionné pour le cockpit
-
-const i18n = translations;
-
-function setLanguage(lang) {
-  if (lang !== 'fr' && lang !== 'en') {
-    lang = 'fr';
-  }
-  currentLang = lang;
-  localStorage.setItem('nectar_lang', lang);
-  
-  // Mettre à jour les éléments statiques avec data-i18n
-  document.querySelectorAll('[data-i18n]').forEach(el => {
-    const key = el.getAttribute('data-i18n');
-    if (i18n[lang] && i18n[lang][key]) {
-      if (i18n[lang][key].includes('<') && i18n[lang][key].includes('>')) {
-        el.innerHTML = i18n[lang][key];
-      } else {
-        el.textContent = i18n[lang][key];
-      }
-    }
-  });
-
-  // Mettre à jour les placeholders
-  document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
-    const key = el.getAttribute('data-i18n-placeholder');
-    if (i18n[lang] && i18n[lang][key]) {
-      el.placeholder = i18n[lang][key];
-    }
-  });
-
-  // Mettre à jour les attributs title
-  document.querySelectorAll('[data-i18n-title]').forEach(el => {
-    const key = el.getAttribute('data-i18n-title');
-    if (i18n[lang] && i18n[lang][key]) {
-      el.title = i18n[lang][key];
-    }
-  });
-
-  // Gérer la classe active sur les boutons
-  const btnFr = document.getElementById('btn-lang-fr');
-  const btnEn = document.getElementById('btn-lang-en');
-  if (btnFr && btnEn) {
-    if (lang === 'fr') {
-      btnFr.classList.add('active');
-      btnEn.classList.remove('active');
-    } else {
-      btnEn.classList.add('active');
-      btnFr.classList.remove('active');
-    }
-  }
-
-  // Mettre à jour les textes dynamiques de connexion et des tableaux
-  updateConnectionUI(isConnected, currentPortName);
-  renderTelemetryTable();
-  updateTrackersTable();
-  renderAtHelperList();
-  updateFlashTexts();
-}
-
-function updateFlashTexts() {
-  const fwVersion = selectFlashFwVersion ? selectFlashFwVersion.value : 'latest';
-  const verStr = fwVersion === 'v1.3.1' ? 'v1.3.1' : 'v1.6.2';
-  
-  // Mettre à jour la description
-  const descEl = document.querySelector('[data-i18n="flash_desc"]');
-  if (descEl) {
-    if (currentLang === 'fr') {
-      descEl.innerHTML = `Flashez directement la version <strong>${verStr}</strong> depuis votre navigateur par port USB.`;
-    } else {
-      descEl.innerHTML = `Flash version <strong>${verStr}</strong> directly from your browser via USB port.`;
-    }
-  }
-  
-  // Mettre à jour le bouton
-  const btnEl = document.getElementById('btn-flash');
-  if (btnEl) {
-    if (currentLang === 'fr') {
-      btnEl.textContent = `Flasher la carte (${verStr})`;
-    } else {
-      btnEl.textContent = `Flash Board (${verStr})`;
-    }
-  }
-}
-
-// ============================================================================
-// Sélection des éléments du DOM
-// ============================================================================
-const btnConnect = document.getElementById('btn-connect');
-const btnDisconnect = document.getElementById('btn-disconnect');
-const lblPortName = document.getElementById('lbl-port-name');
-const connBadge = document.getElementById('conn-badge');
-const selectBaudrate = document.getElementById('baudrate');
-const selectFwVersion = document.getElementById('select-fw-version');
-
-// Inputs Configuration (support des anciens ID 'input-*' si index.html est en cache)
-const inputFreq = document.getElementById('input-freq');
-const selectSf = document.getElementById('select-sf') || document.getElementById('input-sf');
-const selectBw = document.getElementById('select-bw') || document.getElementById('input-bw');
-const selectCrc = document.getElementById('select-crc');
-
-// Boutons Configuration
-const btnReadCfg = document.getElementById('btn-read-cfg');
-const btnWriteCfg = document.getElementById('btn-write-cfg');
-const btnSaveCfg = document.getElementById('btn-save-cfg');
-const btnResetCfg = document.getElementById('btn-reset-cfg');
-
-  // Stats
-  const statRssi = document.getElementById('stat-rssi');
-  const statSnr = document.getElementById('stat-snr');
-  const statCount = document.getElementById('stat-count');
-  const statCrcErrors = document.getElementById('stat-crc-errors');
-  const lblThroughput = document.getElementById('lbl-throughput');
-
-// Terminal & Log
-const terminalLogs = document.getElementById('terminal-logs');
-const terminalForm = document.getElementById('terminal-form');
-const terminalInput = document.getElementById('terminal-input');
-const btnSend = document.getElementById('btn-send');
-
-// Flasher
-const btnFlash = document.getElementById('btn-flash');
-const selectBand = document.getElementById('select-band');
-const selectFlashFwVersion = document.getElementById('select-flash-fw-version');
-const flashProgressContainer = document.getElementById('flash-progress-container');
-const flashProgressBar = document.getElementById('flash-progress-bar');
-const lblFlashStatus = document.getElementById('lbl-flash-status');
-const lblFlashPercent = document.getElementById('lbl-flash-percent');
-
-// Table
-const tableTelemetryBody = document.querySelector('#table-telemetry tbody');
-const rowEmpty = document.getElementById('row-empty');
-
-// Nouveaux boutons de nettoyage, export et option vocale
-const btnClearTerminal = document.getElementById('btn-clear-terminal');
-const btnClearTelemetry = document.getElementById('btn-clear-telemetry');
-const btnExportTelemetry = document.getElementById('btn-export-telemetry');
-const btnClearTrackers = document.getElementById('btn-clear-trackers');
-const btnListSd = document.getElementById('btn-list-sd');
-
-// Helper sécurisé pour activer/désactiver un élément s'il existe
-function setElementDisabled(el, disabled) {
-  if (el) {
-    el.disabled = disabled;
-  }
-}
-
-// ============================================================================
-// Fonctions d'Affichage & Utilitaires
-// ============================================================================
-function speak(text) {
-  const chkVoiceAlerts = document.getElementById('chk-voice-alerts');
-  if (!chkVoiceAlerts || !chkVoiceAlerts.checked) return;
-  
-  if ('speechSynthesis' in window) {
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = currentLang === 'fr' ? 'fr-FR' : 'en-US';
-    window.speechSynthesis.speak(utterance);
-  }
-}
-
-function logToTerminal(message, type = 'cmd-out') {
-  if (!terminalLogs) return;
-  const div = document.createElement('div');
-  div.className = type;
-  div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-  terminalLogs.appendChild(div);
-  
-  // Limiter le nombre de lignes à 500 pour éviter de surcharger le DOM
-  while (terminalLogs.children.length > 500) {
-    terminalLogs.removeChild(terminalLogs.firstChild);
-  }
-  
-  terminalLogs.scrollTop = terminalLogs.scrollHeight;
-}
-
-function updateConnectionUI(connected, name = '') {
-  isConnected = connected;
-  currentPortName = name;
-  if (connBadge) {
-    connBadge.textContent = connected ? getTranslation('badge_connected') : getTranslation('badge_disconnected');
-    connBadge.className = connected ? 'badge connected' : 'badge disconnected';
-  }
-  if (lblPortName) {
-    lblPortName.textContent = connected ? getTranslation('conn_port_prefix') + name : getTranslation('conn_no_device');
-  }
-  
-  setElementDisabled(btnConnect, connected);
-  setElementDisabled(btnDisconnect, !connected);
-  setElementDisabled(selectBaudrate, connected);
-
-  // Activer/Désactiver les contrôles
-  const disabledState = !connected;
-  setElementDisabled(inputFreq, disabledState);
-  setElementDisabled(selectSf, disabledState);
-  setElementDisabled(selectBw, disabledState);
-  setElementDisabled(selectCrc, disabledState);
-  setElementDisabled(btnReadCfg, disabledState);
-  setElementDisabled(btnWriteCfg, disabledState);
-  setElementDisabled(btnSaveCfg, disabledState);
-  setElementDisabled(btnResetCfg, disabledState);
-  setElementDisabled(terminalInput, disabledState);
-  setElementDisabled(btnSend, disabledState);
-  setElementDisabled(btnListSd, disabledState);
-}
+import { getTranslation, updateLanguage } from './translate.js';
+import { decodeWaspPayload } from './decoder.js';
 
 // Convertit un tableau d'octets en chaîne hexadécimale continue
 function bytesToHex(bytes) {
@@ -260,1429 +16,1215 @@ function bytesToHex(bytes) {
     .join('');
 }
 
-function getFriendlyPortName(portInfo) {
-  const vid = portInfo.usbVendorId;
-  const pid = portInfo.usbProductId;
-  
-  if (vid === undefined || pid === undefined) {
-    return currentLang === 'en' ? "Unknown Serial Device" : "Appareil Série Inconnu";
-  }
-  
-  const hexVid = `0x${vid.toString(16).toUpperCase().padStart(4, '0')}`;
-  const hexPid = `0x${pid.toString(16).toUpperCase().padStart(4, '0')}`;
-  
-  const chipsets = {
-    "0x10C4": {
-      name: "Silicon Labs CP210x (USB-to-UART Bridge)",
-      pids: { "0xEA60": "CP2102/CP2109" }
-    },
-    "0x1A86": {
-      name: "WCH CH340/CH341 (USB-to-Serial)",
-      pids: { "0x7523": "CH340" }
-    },
-    "0x0403": {
-      name: "FTDI USB Serial",
-      pids: { "0x6001": "FT232R" }
-    },
-    "0x067B": {
-      name: "Prolific PL2303",
-      pids: { "0x2303": "PL2303 TA" }
-    },
-    "0x2341": {
-      name: "Arduino",
-      pids: {
-        "0x0043": "Uno R3",
-        "0x0001": "Uno",
-        "0x0042": "Mega 2560 R3"
-      }
-    },
-    "0x303A": {
-      name: "Espressif USB-JTAG-Serial",
-      pids: {
-        "0x1001": "ESP32-S3/C3 USB"
-      }
-    }
-  };
-  
-  const chipset = chipsets[hexVid];
-  if (chipset) {
-    const specificModel = chipset.pids[hexPid] || "";
-    return `${chipset.name}${specificModel ? ` (${specificModel})` : ''} [VID: ${hexVid}, PID: ${hexPid}]`;
-  }
-  
-  return `USB Device [VID: ${hexVid}, PID: ${hexPid}]`;
-}
-
-// ============================================================================
-// API Web Serial - Connexion et Lecture
-// ============================================================================
-async function connectSerial() {
-  if ('serial' in navigator) {
-    try {
-      port = await navigator.serial.requestPort();
-      const baud = selectBaudrate ? parseInt(selectBaudrate.value, 10) : 115200;
-      
-      logToTerminal(getTranslation('log_port_opening', { baud: baud }), 'sys-out');
-      await port.open({ baudRate: baud });
-      
-      const portInfo = port.getInfo();
-      const portName = getFriendlyPortName(portInfo);
-      
-      updateConnectionUI(true, portName);
-      logToTerminal(getTranslation('log_conn_success'), 'sys-out');
-
-      // Démarrer la boucle de lecture
-      readLoopPromise = readSerialLoop();
-
-      // Envoyer la synchronisation temporelle et la demande de configuration initiale après le boot de la carte (6s) de manière séquentielle (évite les verrous)
-      setTimeout(async () => {
-        const currentEpoch = Math.floor(Date.now() / 1000);
-        await sendSerialText(`AT+TIME=${currentEpoch}`);
-        await sendSerialText('AT+FREQ?');
-        await sendSerialText('AT+SF?');
-        await sendSerialText('AT+BW?');
-        await sendSerialText('AT+CRC?');
-      }, 6000);
-
-    } catch (err) {
-      logToTerminal(getTranslation('log_conn_error', { message: err.message }), 'sys-out');
-      console.error(err);
-    }
-  } else {
-    alert(getTranslation('alert_browser_unsupported'));
-  }
-}
-
-async function disconnectSerial() {
-  if (!isConnected) return;
-  isConnected = false;
-
-  if (reader) {
-    try {
-      await reader.cancel();
-    } catch (err) {}
-  }
-  
-  // Attendre la fin propre de la boucle de lecture pour éviter les verrous
-  if (readLoopPromise) {
-    try {
-      await readLoopPromise;
-    } catch (err) {}
-    readLoopPromise = null;
-  }
-  
-  if (port) {
-    try {
-      await port.close();
-    } catch (err) {
-      console.error("Erreur de fermeture du port:", err);
-    }
-    port = null;
-  }
-
-  updateConnectionUI(false);
-  logToTerminal(getTranslation('log_disconnected'), 'sys-out');
-}
-
-async function readSerialLoop() {
-  try {
-    while (port && port.readable && isConnected) {
-      reader = port.readable.getReader();
-      try {
-        while (isConnected) {
-          const { value, done } = await reader.read();
-          if (done) {
-            break;
-          }
-          if (value) {
-            bytesCountThisSecond += value.length;
-            // Ajouter les nouveaux octets au buffer
-            for (let i = 0; i < value.length; i++) {
-              rxBuffer.push(value[i]);
-            }
-            parseRxBuffer();
-          }
-        }
-      } catch (err) {
-        logToTerminal(getTranslation('log_read_error', { message: err.message }), 'sys-out');
-        break;
-      } finally {
-        if (reader) {
-          reader.releaseLock();
-          reader = null;
-        }
-      }
-    }
-  } finally {
-    if (isConnected) {
-      setTimeout(() => disconnectSerial(), 0);
-    }
-  }
-}
-
-// Envoie du texte brut avec retour chariot (\n) de manière séquentielle sécurisée
-async function sendSerialText(text) {
-  if (!port || !port.writable) return;
-  
-  try {
-    const encoder = new TextEncoder();
-    const data = encoder.encode(text + '\n');
+class NectarApp {
+  constructor() {
+    this.serial = null;
+    this.map = null;
     
-    const writer = port.writable.getWriter();
-    await writer.write(data);
-    writer.releaseLock();
+    // États de l'application
+    this.packetIndex = 0;
+    this.crcErrorsCount = 0;
+    this.activeTrackers = {};     // { trackerName: { name, typeLabelKey, lastApid, packetCount, lastSeen, lastPayloadHex, lastRssi, lastSnr, isLost, voiceLostSpoken } }
+    this.allReceivedFrames = [];  // Capé à 5000 trames
+    this.waspTrackersData = {};   // { trackerName: { alt, spd, ... } }
+    this.activeWaspTrackerName = "";
     
-    logToTerminal(text, 'cmd-in');
-  } catch (err) {
-    logToTerminal(getTranslation('log_send_error', { message: err.message }), 'sys-out');
-    console.error("Erreur sendSerialText:", err);
-  }
-}
-
-// ============================================================================
-// Analyseur de Buffer (Décodeur de Trames et Textes)
-// ============================================================================
-function parseRxBuffer() {
-  let processing = true;
-  
-  while (processing && rxBuffer.length > 0) {
-    // Si c'est le début d'une trame binaire NectarMC (NECTAR_MAGIC = 0xEB)
-    if (rxBuffer[0] === 0xEB) {
-      const fwVersion = selectFwVersion ? selectFwVersion.value : 'gs_flag';
-      let totalFrameSize = 0;
-      
-      if (fwVersion === 'gs_flag') {
-        if (rxBuffer.length < 5) {
-          processing = false; // Attente d'octets supplémentaires pour lire la taille
-          break;
-        }
-        const gsFlag = rxBuffer[3];
-        const payloadSize = rxBuffer[4];
-        const hasRssi = (gsFlag & 0x01) ? 1 : 0;
-        const hasSnr = (gsFlag & 0x02) ? 1 : 0;
-        const hasTimestamp = (gsFlag & 0x3C) ? 4 : 0;
-        // v1.6.2 : Alignement RF et suppression du saut de ligne série pour NectarMC (pas de +1 pour \n)
-        totalFrameSize = 5 + payloadSize + hasRssi + hasSnr + hasTimestamp + 2;
-      } else { // 1.3.1 (Original sans GSFLAG)
-        if (rxBuffer.length < 4) {
-          processing = false;
-          break;
-        }
-        const payloadSize = rxBuffer[3];
-        totalFrameSize = 4 + payloadSize + 2 + 1; // Header(4) + Payload(N) + CRC16(2) + \n(1)
-      }
-      
-      if (rxBuffer.length < totalFrameSize) {
-        processing = false; // La trame n'est pas encore complète
-        break;
-      }
-      
-      // Extraction de la trame complète
-      const frameBytes = rxBuffer.slice(0, totalFrameSize);
-      rxBuffer = rxBuffer.slice(totalFrameSize);
-      
-      decodeNectarFrame(frameBytes);
-    } 
-    // Sinon c'est du texte brut (Boot logs, retours de commandes AT)
-    else {
-      // Trouver la fin de ligne
-      const lfIndex = rxBuffer.indexOf(10); // Code ASCII pour '\n'
-      const crIndex = rxBuffer.indexOf(13); // Code ASCII pour '\r'
-      
-      let splitIndex = -1;
-      if (lfIndex !== -1 && crIndex !== -1) {
-        splitIndex = Math.min(lfIndex, crIndex);
-      } else {
-        splitIndex = lfIndex !== -1 ? lfIndex : crIndex;
-      }
-      
-      if (splitIndex !== -1) {
-        const lineBytes = rxBuffer.slice(0, splitIndex);
-        
-        // Retirer la ligne décodée et le retour chariot du buffer
-        let skipBytes = splitIndex + 1;
-        // Si \r\n se suivent, on saute les deux
-        if (rxBuffer[splitIndex] === 13 && rxBuffer[splitIndex + 1] === 10) {
-          skipBytes = splitIndex + 2;
-        }
-        rxBuffer = rxBuffer.slice(skipBytes);
-        
-        const decoder = new TextDecoder();
-        const lineText = decoder.decode(new Uint8Array(lineBytes)).trim();
-        
-        if (lineText.length > 0) {
-          if (lineText === "+DUMP: START") {
-            isDownloadingSdFile = true;
-            sdDownloadBuffer = [];
-            sdDownloadLinesCount = 0;
-            return;
-          }
-          if (lineText === "+DUMP: END") {
-            isDownloadingSdFile = false;
-            finishSdFileDownload();
-            return;
-          }
-          if (isDownloadingSdFile) {
-            sdDownloadBuffer.push(lineText);
-            sdDownloadLinesCount++;
-            
-            const approxBytes = sdDownloadLinesCount * 60;
-            let percent = Math.min(99, Math.round((approxBytes / sdDownloadSize) * 100));
-            if (isNaN(percent) || percent < 0) percent = 50;
-            updateSdProgress(percent);
-            return;
-          }
-          
-          logToTerminal(lineText, 'cmd-out');
-          parseATResponse(lineText);
-        }
-      } else {
-        // Pas de fin de ligne trouvée.
-        // Si le buffer de texte devient trop grand (ex: > 1024), on le vide pour éviter le débordement
-        if (rxBuffer.length > 1024) {
-          rxBuffer = [];
-        }
-        processing = false;
-      }
-    }
-  }
-}
-
-// Rendu dynamique de la liste d'aide-mémoire AT
-function renderAtHelperList() {
-  const container = document.getElementById('at-helper-list');
-  if (!container) return;
-  container.innerHTML = '';
-  
-  const AT_COMMANDS_HELP = [
-    { cmd: "AT", descKey: "at_desc_at" },
-    { cmd: "AT+HELP", descKey: "at_desc_help" },
-    { cmd: "AT+INFO", descKey: "at_desc_info" },
-    { cmd: "AT+FREQ?", descKey: "at_desc_freq_get" },
-    { cmd: "AT+FREQ=", descKey: "at_desc_freq_set" },
-    { cmd: "AT+SF?", descKey: "at_desc_sf_get" },
-    { cmd: "AT+SF=", descKey: "at_desc_sf_set" },
-    { cmd: "AT+BW?", descKey: "at_desc_bw_get" },
-    { cmd: "AT+BW=", descKey: "at_desc_bw_set" },
-    { cmd: "AT+CRC?", descKey: "at_desc_crc_get" },
-    { cmd: "AT+CRC=", descKey: "at_desc_crc_set" },
-    { cmd: "AT+FMT?", descKey: "at_desc_fmt_get" },
-    { cmd: "AT+FMT=", descKey: "at_desc_fmt_set" },
-    { cmd: "AT+TIME?", descKey: "at_desc_time_get" },
-    { cmd: "AT+TIME=", descKey: "at_desc_time_set" },
-    { cmd: "AT+RSSI?", descKey: "at_desc_rssi_get" },
-    { cmd: "AT+SNR?", descKey: "at_desc_snr_get" },
-    { cmd: "AT+SIG?", descKey: "at_desc_sig_get" },
-    { cmd: "AT+ERR?", descKey: "at_desc_err_get" },
-    { cmd: "AT+CFG", descKey: "at_desc_cfg" },
-    { cmd: "AT+LIST", descKey: "at_desc_list" },
-    { cmd: "AT+DUMP=", descKey: "at_desc_dump" },
-    { cmd: "AT+SAVE", descKey: "at_desc_save" },
-    { cmd: "AT+RESET", descKey: "at_desc_reset" }
-  ];
-
-  AT_COMMANDS_HELP.forEach(item => {
-    const el = document.createElement('div');
-    el.className = 'at-helper-item';
-    el.innerHTML = `
-      <span class="at-helper-cmd">${item.cmd}</span>
-      <span class="at-helper-desc">${getTranslation(item.descKey)}</span>
-    `;
-    el.addEventListener('click', () => {
-      const input = document.getElementById('terminal-input');
-      if (input) {
-        input.value = item.cmd;
-        input.focus();
-      }
-    });
-    container.appendChild(el);
-  });
-}
-
-// Rendu dynamique du tableau de télémétrie (gère le changement de langue)
-function renderTelemetryTable() {
-  if (!tableTelemetryBody) return;
-  
-  // Vider le corps du tableau
-  tableTelemetryBody.innerHTML = '';
-  
-  if (allReceivedFrames.length === 0) {
-    if (rowEmpty) {
-      rowEmpty.style.display = 'table-row';
-      tableTelemetryBody.appendChild(rowEmpty);
-    }
-    return;
-  }
-  
-  if (rowEmpty) {
-    rowEmpty.style.display = 'none';
-  }
-  
-  // Afficher les 50 dernières trames reçues (les plus récentes en premier)
-  const framesToShow = allReceivedFrames.slice(-50).reverse();
-  framesToShow.forEach(f => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td>${f.index}</td>
-      <td>${f.timestamp}</td>
-      <td><span class="badge connected">${f.tracker}</span></td>
-      <td>${f.apid}</td>
-      <td>${f.size} ${getTranslation('unit_bytes')}</td>
-      <td>${f.rssi} dBm</td>
-      <td>${f.snr} dB</td>
-      <td><span style="font-family: var(--font-mono); color: var(--color-success); font-weight: 600; white-space: nowrap;">✔ ${f.crcHex}</span></td>
-      <td style="font-family: var(--font-mono); color: var(--color-cyan); word-break: break-all;">${f.payload}</td>
-    `;
-    tableTelemetryBody.appendChild(tr);
-  });
-}
-
-// Calcule le CRC16-CCITT (polynôme 0x1021, valeur initiale 0xFFFF)
-function calculateCRC16(data) {
-  let crc = 0xFFFF;
-  for (let i = 0; i < data.length; i++) {
-    crc ^= (data[i] << 8);
-    for (let j = 0; j < 8; j++) {
-      if (crc & 0x8000) {
-        crc = ((crc << 1) ^ 0x1021) & 0xFFFF;
-      } else {
-        crc = (crc << 1) & 0xFFFF;
-      }
-    }
-  }
-  return crc;
-}
-
-function decodeNectarFrame(frame) {
-  const fwVersion = selectFwVersion ? selectFwVersion.value : 'gs_flag';
-  let payloadSize = 0;
-  let payloadOffset = 4;
-  let epoch = 0;
-  let crc = 0;
-  let calculatedCrc = 0;
-  let rssi = 0;
-  let snr = 0;
-  let gsFlag = 0;
-
-  if (fwVersion === 'gs_flag') {
-    payloadOffset = 5;
-    gsFlag = frame[3];
-    payloadSize = frame[4];
+    // Graphiques de signal
+    this.maxChartPoints = 30;
+    this.rssiHistory = [];
+    this.snrHistory = [];
     
-    let footerOffset = 5 + payloadSize;
-    if (gsFlag & 0x01) {
-      const rawRssi = frame[footerOffset++];
-      rssi = rawRssi >= 128 ? rawRssi - 256 : rawRssi;
-    }
-    if (gsFlag & 0x02) {
-      const rawSnr = frame[footerOffset++];
-      const signedSnr = rawSnr >= 128 ? rawSnr - 256 : rawSnr;
-      snr = signedSnr / 4.0;
-    }
+    // Débit série
+    this.bytesCountThisSecond = 0;
+    this.throughputHistory = Array(30).fill(0);
     
-    // Lecture du Timestamp (4 octets Unix Epoch Little-Endian) si présent
-    if (gsFlag & 0x3C) {
-      epoch = (frame[footerOffset + 3] << 24 >>> 0) +
-              (frame[footerOffset + 2] << 16) +
-              (frame[footerOffset + 1] << 8) +
-              frame[footerOffset];
-      footerOffset += 4;
-    }
-    
-    crc = (frame[footerOffset + 1] << 8) | frame[footerOffset];
-    calculatedCrc = calculateCRC16(frame.slice(0, footerOffset));
-  } else { // 1.3.1 (Sans GSFLAG - v1.3.1 / master)
-    payloadSize = frame[3];
-    payloadOffset = 4;
-    rssi = 0;
-    snr = 0;
-    
-    crc = (frame[4 + payloadSize + 1] << 8) | frame[4 + payloadSize];
-    calculatedCrc = calculateCRC16(frame.slice(0, 4 + payloadSize));
-  }
-
-  // Vérification du CRC
-  if (crc !== calculatedCrc) {
-    crcErrorsCount++;
-    if (statCrcErrors) {
-      statCrcErrors.textContent = crcErrorsCount.toString();
-    }
-    const hexCrcRec = '0x' + crc.toString(16).toUpperCase().padStart(4, '0');
-    const hexCrcCalc = '0x' + calculatedCrc.toString(16).toUpperCase().padStart(4, '0');
-    logToTerminal(getTranslation('log_crc_error', { rec: hexCrcRec, calc: hexCrcCalc }), 'sys-out');
-    return; // Rejeter la trame corrompue
-  }
-
-  packetIndex++;
-  
-  const idMission = (frame[2] << 8) | frame[1];
-  const ssid = idMission >> 6;
-  const apid = idMission & 0x3F;
-  const ssidType = (ssid >> 8) & 0x03;
-  const ssidNum = ssid & 0xFF;
-  
-  const payload = frame.slice(payloadOffset, payloadOffset + payloadSize); // Les données utiles LoRa brutes
-  
-
-
-  // ... (ssidPrefix extraction code is identical) ...
-  let ssidPrefix = 'OTHER';
-  let missionTypeLabelKey = 'mission_other';
-  if (ssidType === 0) {
-    ssidPrefix = 'FX';
-    missionTypeLabelKey = 'mission_rocket';
-  } else if (ssidType === 1) {
-    ssidPrefix = 'MF';
-    missionTypeLabelKey = 'mission_minirocket';
-  } else if (ssidType === 2) {
-    ssidPrefix = 'BALLOON';
-    missionTypeLabelKey = 'mission_balloon';
-  }
-  
-  const trackerName = `${ssidPrefix}${ssidNum}`;
-  
-  const timestamp = (epoch > 100000000) ? new Date(epoch * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
-  
-  const crcHex = '0x' + crc.toString(16).toUpperCase().padStart(4, '0');
-
-  // Ajouter à l'historique complet (capé à 5000 trames) avec la taille brute LoRa
-  allReceivedFrames.push({
-    index: packetIndex,
-    timestamp: timestamp,
-    tracker: trackerName,
-    apid: apid,
-    size: payloadSize, // Taille réelle des données utiles LoRa
-    payload: bytesToHex(payload),
-    rssi: rssi,
-    snr: snr,
-    crcHex: crcHex
-  });
-  if (allReceivedFrames.length > 5000) {
-    allReceivedFrames.shift();
-  }
-  
-  // Ajouter aux graphiques de signal en direct
-  rssiHistory.push({ value: rssi, time: timestamp });
-  if (rssiHistory.length > maxChartPoints) rssiHistory.shift();
-  
-  snrHistory.push({ value: snr, time: timestamp });
-  if (snrHistory.length > maxChartPoints) snrHistory.shift();
-  
-  drawSignalCharts();
-  
-  renderTelemetryTable();
-
-  // Mettre à jour la classification des trackers
-  const isNew = !activeTrackers[trackerName];
-  if (isNew) {
-    activeTrackers[trackerName] = {
-      name: trackerName,
-      typeLabelKey: missionTypeLabelKey,
-      lastApid: apid,
-      packetCount: 0,
-      lastSeen: Date.now(),
-      lastPayloadHex: bytesToHex(payload),
-      lastRssi: rssi,
-      lastSnr: snr,
-      isLost: false
+    // Configuration Radio Active
+    this.currentConfig = {
+      frequency: 869.525,
+      sf: 8,
+      bw: 250.0
     };
-    speak(getTranslation('voice_new_tracker', { name: trackerName.split('').join(' ') }));
-  } else {
-    if (activeTrackers[trackerName].isLost) {
-      activeTrackers[trackerName].isLost = false;
-      speak(getTranslation('voice_tracker_back', { name: trackerName.split('').join(' ') }));
-    }
-  }
-  
-  activeTrackers[trackerName].lastApid = apid;
-  activeTrackers[trackerName].packetCount++;
-  activeTrackers[trackerName].lastSeen = Date.now();
-  activeTrackers[trackerName].lastPayloadHex = bytesToHex(payload);
-  activeTrackers[trackerName].lastRssi = rssi;
-  activeTrackers[trackerName].lastSnr = snr;
-  
-  updateTrackersTable();
+    this.currentPortName = '';
+    
+    // Variables pour les journaux SD
+    this.isDownloadingSdFile = false;
+    this.sdDownloadFilename = '';
+    this.sdDownloadSize = 0;
+    this.sdDownloadBuffer = [];
+    this.sdDownloadLinesCount = 0;
 
-  // Décodage optionnel de la charge utile WASP (29 octets + 3 octets de header NectarMC = 32 octets au total)
-  const chkWaspDecoding = document.getElementById('chk-wasp-decoding');
-  
-  if (chkWaspDecoding && chkWaspDecoding.checked && payloadSize === 29) {
-    try {
-      const buffer = new ArrayBuffer(29);
-      const view = new DataView(buffer);
-      for (let i = 0; i < 29; i++) {
-        view.setUint8(i, payload[i]);
-      }
+    // Référencement des sélecteurs DOM
+    this.dom = {};
+  }
+
+  /**
+   * Initialise l'application, instancie les modules et lie les événements du DOM.
+   */
+  init() {
+    this.cacheDomElements();
+    
+    // Instanciation de la carte
+    this.map = new NectarMap('wasp-map');
+    
+    // Instanciation du module Web Serial
+    this.serial = new NectarSerial({
+      onPacket: (decoded) => this.onPacketReceived(decoded),
+      onLine: (lineText) => this.onLineReceived(lineText),
+      onLog: (msg, type) => this.logToTerminal(msg, type),
+      onBytesRead: (count) => { this.bytesCountThisSecond += count; },
+      onConnectionChanged: (connected, name) => this.updateConnectionUI(connected, name)
+    });
+
+    this.bindEvents();
+    
+    // Rendu initial de l'aide AT
+    this.renderAtHelperList();
+    this.updateFlashTexts();
+
+    // Démarrage des tâches périodiques (Calcul débit 1Hz, Péremption trackers 0.5Hz)
+    setInterval(() => this.calculateThroughput(), 1000);
+    setInterval(() => this.checkTrackersTimeout(), 2000);
+
+    // Écoute de l'événement personnalisé de changement de langue
+    window.addEventListener('lang-changed', (e) => this.onLanguageChanged(e.detail));
+  }
+
+  /**
+   * Référence tous les éléments HTML requis pour l'IHM.
+   */
+  cacheDomElements() {
+    this.dom = {
+      btnConnect: document.getElementById('btn-connect'),
+      btnDisconnect: document.getElementById('btn-disconnect'),
+      lblPortName: document.getElementById('lbl-port-name'),
+      connBadge: document.getElementById('conn-badge'),
+      selectBaudrate: document.getElementById('baudrate'),
+      selectFwVersion: document.getElementById('select-fw-version'),
       
-      const waspId = ssidNum;
-      const waspApid = apid;
-      const waspType = ssidType;
+      // Configuration Radio
+      inputFreq: document.getElementById('input-freq'),
+      selectSf: document.getElementById('select-sf') || document.getElementById('input-sf'),
+      selectBw: document.getElementById('select-bw') || document.getElementById('input-bw'),
+      selectCrc: document.getElementById('select-crc'),
+      btnReadCfg: document.getElementById('btn-read-cfg'),
+      btnWriteCfg: document.getElementById('btn-write-cfg'),
+      btnSaveCfg: document.getElementById('btn-save-cfg'),
+      btnResetCfg: document.getElementById('btn-reset-cfg'),
       
-      const waspUtc = view.getUint32(0, true);
-      const waspLat = view.getFloat32(4, true);
-      const waspLon = view.getFloat32(8, true);
-      const waspAlt = view.getFloat32(12, true);
-      const waspSpd = view.getFloat32(16, true);
-      const waspCog = view.getFloat32(20, true);
-      const waspVbat = view.getUint16(24, true);
-      const waspTemp = view.getInt16(26, true);
-      const waspStatus = view.getUint8(28);
+      // Indicateurs
+      statRssi: document.getElementById('stat-rssi'),
+      statSnr: document.getElementById('stat-snr'),
+      statCount: document.getElementById('stat-count'),
+      statCrcErrors: document.getElementById('stat-crc-errors'),
+      lblThroughput: document.getElementById('lbl-throughput'),
       
-      const gpsFix = (waspStatus & 0x80) !== 0;
-      const numSats = waspStatus & 0x1F;
+      // Terminal
+      terminalLogs: document.getElementById('terminal-logs'),
+      terminalForm: document.getElementById('terminal-form'),
+      terminalInput: document.getElementById('terminal-input'),
+      btnSend: document.getElementById('btn-send'),
+      btnClearTerminal: document.getElementById('btn-clear-terminal'),
       
-      const isNewWaspTracker = !waspTrackersData[trackerName];
+      // Flashage
+      btnFlash: document.getElementById('btn-flash'),
+      selectBand: document.getElementById('select-band'),
+      selectFlashFwVersion: document.getElementById('select-flash-fw-version'),
+      flashProgressContainer: document.getElementById('flash-progress-container'),
+      flashProgressBar: document.getElementById('flash-progress-bar'),
+      lblFlashStatus: document.getElementById('lbl-flash-status'),
+      lblFlashPercent: document.getElementById('lbl-flash-percent'),
       
-      // Limitation stricte à 10 trackers WASP maximum pour des raisons de performance et de lisibilité
-      if (isNewWaspTracker && Object.keys(waspTrackersData).length >= 10) {
-        // Trouver le plus ancien tracker basé sur le dernier paquet vu
-        let oldestTrackerName = "";
-        let oldestTime = Infinity;
-        
-        Object.keys(waspTrackersData).forEach(name => {
-          // Utiliser activeTrackers pour connaître le timestamp réel d'activité
-          const lastSeen = activeTrackers[name] ? activeTrackers[name].lastSeen : 0;
-          if (lastSeen < oldestTime && name !== activeWaspTrackerName) {
-            oldestTime = lastSeen;
-            oldestTrackerName = name;
+      // Télémétrie & Logs
+      tableTelemetryBody: document.querySelector('#table-telemetry tbody'),
+      rowEmpty: document.getElementById('row-empty'),
+      btnClearTelemetry: document.getElementById('btn-clear-telemetry'),
+      btnExportTelemetry: document.getElementById('btn-export-telemetry'),
+      btnClearTrackers: document.getElementById('btn-clear-trackers'),
+      btnListSd: document.getElementById('btn-list-sd'),
+      
+      // WASP
+      chkWaspDecoding: document.getElementById('chk-wasp-decoding'),
+      waspSection: document.getElementById('wasp-section'),
+      selectWaspTracker: document.getElementById('select-wasp-tracker'),
+      btnRecenterWasp: document.getElementById('btn-recenter-wasp'),
+      chkVoiceAlerts: document.getElementById('chk-voice-alerts')
+    };
+  }
+
+  /**
+   * Lie les écouteurs d'événements utilisateur aux contrôles du DOM.
+   */
+  bindEvents() {
+    // Connexion Série
+    if (this.dom.btnConnect) {
+      this.dom.btnConnect.addEventListener('click', () => {
+        const baud = this.dom.selectBaudrate ? parseInt(this.dom.selectBaudrate.value, 10) : 115200;
+        const fmt = this.dom.selectFwVersion ? this.dom.selectFwVersion.value : 'gs_flag';
+        this.serial.connect(baud, fmt).then(() => {
+          // Demande de configuration initiale après démarrage de la carte (6 secondes de temporisation)
+          setTimeout(() => {
+            const currentEpoch = Math.floor(Date.now() / 1000);
+            this.serial.sendSerialText(`AT+TIME=${currentEpoch}`);
+            this.serial.sendSerialText('AT+FREQ?');
+            this.serial.sendSerialText('AT+SF?');
+            this.serial.sendSerialText('AT+BW?');
+            this.serial.sendSerialText('AT+CRC?');
+          }, 6000);
+        }).catch(err => {
+          if (err.message === "unsupported") {
+            alert(getTranslation('alert_browser_unsupported'));
           }
         });
-        
-        if (oldestTrackerName) {
-          // Supprimer de la carte
-          if (waspMap) {
-            waspMap.removeTracker(oldestTrackerName);
+      });
+    }
+    
+    if (this.dom.btnDisconnect) {
+      this.dom.btnDisconnect.addEventListener('click', () => this.serial.disconnect());
+    }
+
+    // Détection déconnexion matérielle USB
+    navigator.serial?.addEventListener('disconnect', (event) => {
+      if (this.serial.port && event.target === this.serial.port) {
+        this.logToTerminal(getTranslation('log_physical_disconnect'), "sys-out");
+        this.serial.disconnect();
+      }
+    });
+
+    // Lecture / Écriture de Configuration Radio
+    if (this.dom.btnReadCfg) {
+      this.dom.btnReadCfg.addEventListener('click', () => {
+        this.serial.sendSerialText('AT+FREQ?');
+        this.serial.sendSerialText('AT+SF?');
+        this.serial.sendSerialText('AT+BW?');
+        this.serial.sendSerialText('AT+CRC?');
+      });
+    }
+    
+    if (this.dom.btnWriteCfg) {
+      this.dom.btnWriteCfg.addEventListener('click', () => {
+        if (this.dom.inputFreq) {
+          const freq = parseFloat(this.dom.inputFreq.value);
+          if (!isNaN(freq)) this.serial.sendSerialText(`AT+FREQ=${freq.toFixed(3)}`);
+        }
+        if (this.dom.selectSf) {
+          this.serial.sendSerialText(`AT+SF=${this.dom.selectSf.value}`);
+        }
+        if (this.dom.selectBw) {
+          this.serial.sendSerialText(`AT+BW=${this.dom.selectBw.value}`);
+        }
+        if (this.dom.selectCrc) {
+          this.serial.sendSerialText(`AT+CRC=${this.dom.selectCrc.value}`);
+        }
+      });
+    }
+    
+    if (this.dom.btnSaveCfg) {
+      this.dom.btnSaveCfg.addEventListener('click', () => this.serial.sendSerialText('AT+SAVE'));
+    }
+    
+    if (this.dom.btnResetCfg) {
+      this.dom.btnResetCfg.addEventListener('click', () => {
+        if (confirm(getTranslation('confirm_factory_reset'))) {
+          this.serial.sendSerialText('AT+RESET');
+        }
+      });
+    }
+
+    // Terminal
+    if (this.dom.terminalForm) {
+      this.dom.terminalForm.addEventListener('submit', (e) => {
+        e.preventDefault();
+        if (this.dom.terminalInput) {
+          const cmd = this.dom.terminalInput.value.trim();
+          if (cmd.length > 0) {
+            this.serial.sendSerialText(cmd);
+            this.dom.terminalInput.value = '';
           }
-          delete waspTrackersData[oldestTrackerName];
-          
-          // Mettre à jour le select
-          const selectWaspTracker = document.getElementById('select-wasp-tracker');
-          if (selectWaspTracker) {
-            const optionToRemove = Array.from(selectWaspTracker.options).find(opt => opt.value === oldestTrackerName);
-            if (optionToRemove) {
-              selectWaspTracker.removeChild(optionToRemove);
+        }
+      });
+    }
+    
+    if (this.dom.btnClearTerminal) {
+      this.dom.btnClearTerminal.addEventListener('click', () => {
+        if (this.dom.terminalLogs) this.dom.terminalLogs.innerHTML = '';
+      });
+    }
+
+    // Téléchargement Logs SD
+    if (this.dom.btnListSd) {
+      this.dom.btnListSd.addEventListener('click', () => {
+        const tableBody = document.querySelector('#table-sd-files tbody');
+        if (tableBody) {
+          tableBody.innerHTML = '';
+          const rowEmpty = document.createElement('tr');
+          rowEmpty.id = 'row-empty-sd-files';
+          rowEmpty.innerHTML = `<td colspan="3" class="text-center text-secondary" style="padding: 1rem 0; text-align: center;">${getTranslation('sd_files_empty')}</td>`;
+          tableBody.appendChild(rowEmpty);
+        }
+        this.serial.sendSerialText('AT+LIST');
+      });
+    }
+
+    // Nettoyage Télémétrie et Trackers
+    if (this.dom.btnClearTelemetry) {
+      this.dom.btnClearTelemetry.addEventListener('click', () => {
+        this.allReceivedFrames = [];
+        this.packetIndex = 0;
+        this.crcErrorsCount = 0;
+        this.rssiHistory = [];
+        this.snrHistory = [];
+        
+        if (this.dom.statCount) this.dom.statCount.textContent = '0 / 0';
+        if (this.dom.statCrcErrors) this.dom.statCrcErrors.textContent = '0';
+        if (this.dom.statRssi) this.dom.statRssi.textContent = '--';
+        if (this.dom.statSnr) this.dom.statSnr.textContent = '--';
+        
+        this.renderTelemetryTable();
+        this.drawSignalCharts();
+      });
+    }
+    
+    if (this.dom.btnExportTelemetry) {
+      this.dom.btnExportTelemetry.addEventListener('click', () => this.exportTelemetryToCSV());
+    }
+    
+    if (this.dom.btnClearTrackers) {
+      this.dom.btnClearTrackers.addEventListener('click', () => {
+        this.activeTrackers = {};
+        this.waspTrackersData = {};
+        this.activeWaspTrackerName = "";
+        
+        this.updateTrackersTable();
+        
+        if (this.map) {
+          this.map.clear();
+        }
+        
+        this.updateWaspCockpit(null);
+        if (this.dom.selectWaspTracker) {
+          this.dom.selectWaspTracker.innerHTML = '<option value="" disabled selected>Attente émetteur...</option>';
+        }
+      });
+    }
+
+    // Options Décodeur WASP
+    if (this.dom.chkWaspDecoding) {
+      this.dom.chkWaspDecoding.addEventListener('change', () => {
+        if (this.dom.chkWaspDecoding.checked) {
+          if (this.dom.waspSection) {
+            this.dom.waspSection.classList.remove('hidden');
+            this.map.init();
+            setTimeout(() => {
+              this.map.invalidateSize();
+              if (this.map.lastPos) {
+                this.map.setView(this.map.lastPos.lat, this.map.lastPos.lon, 13);
+              }
+            }, 150);
+            this.dom.waspSection.scrollIntoView({ behavior: 'smooth' });
+          }
+        } else {
+          if (this.dom.waspSection) {
+            this.dom.waspSection.classList.add('hidden');
+          }
+        }
+      });
+    }
+
+    if (this.dom.selectWaspTracker) {
+      this.dom.selectWaspTracker.addEventListener('change', () => {
+        this.activeWaspTrackerName = this.dom.selectWaspTracker.value;
+        this.updateWaspCockpit(this.activeWaspTrackerName);
+        
+        const data = this.waspTrackersData[this.activeWaspTrackerName];
+        if (data && data.lat !== 0 && data.lon !== 0) {
+          this.map.setView(data.lat, data.lon, this.map.map.getZoom() < 10 ? 14 : this.map.map.getZoom());
+          if (this.map.markers[this.activeWaspTrackerName]) {
+            this.map.markers[this.activeWaspTrackerName].openPopup();
+          }
+        }
+      });
+    }
+
+    if (this.dom.btnRecenterWasp) {
+      this.dom.btnRecenterWasp.addEventListener('click', () => {
+        if (!this.activeWaspTrackerName) return;
+        const data = this.waspTrackersData[this.activeWaspTrackerName];
+        if (data && data.lat !== 0 && data.lon !== 0) {
+          this.map.setView(data.lat, data.lon, this.map.map.getZoom() < 10 ? 14 : this.map.map.getZoom());
+          if (this.map.markers[this.activeWaspTrackerName]) {
+            this.map.markers[this.activeWaspTrackerName].openPopup();
+          }
+        }
+      });
+    }
+
+    // Outil de Flashage de Firmware
+    if (this.dom.btnFlash) {
+      this.dom.btnFlash.addEventListener('click', () => {
+        if (this.serial.isConnected) {
+          alert(getTranslation('alert_monitor_active_disconnect'));
+          return;
+        }
+        
+        const band = this.dom.selectBand ? this.dom.selectBand.value : '868';
+        const fwVersion = this.dom.selectFlashFwVersion ? this.dom.selectFlashFwVersion.value : 'latest';
+        const verTag = fwVersion === 'latest' ? 'v1.6.2' : fwVersion;
+        const binUrl = `binaries/firmware_bluetooth_${band}_${verTag}.bin`;
+        
+        this.setFlasherControlsDisabled(true);
+        if (this.dom.flashProgressContainer) this.dom.flashProgressContainer.classList.remove('hidden');
+        if (this.dom.lblFlashStatus) this.dom.lblFlashStatus.textContent = getTranslation('flash_status_connecting');
+        if (this.dom.lblFlashPercent) this.dom.lblFlashPercent.textContent = "0%";
+        if (this.dom.flashProgressBar) this.dom.flashProgressBar.style.width = "0%";
+        
+        this.serial.flashFirmware(
+          binUrl,
+          (percent, statusKey, extra) => {
+            if (this.dom.lblFlashPercent) this.dom.lblFlashPercent.textContent = `${percent}%`;
+            if (this.dom.flashProgressBar) this.dom.flashProgressBar.style.width = `${percent}%`;
+            if (this.dom.lblFlashStatus) {
+              this.dom.lblFlashStatus.textContent = extra ? getTranslation(statusKey, { chip: extra }) : getTranslation(statusKey);
+            }
+          },
+          (logMsg) => this.logToTerminal(logMsg, 'sys-out')
+        ).catch(err => {
+          if (this.dom.lblFlashStatus) this.dom.lblFlashStatus.textContent = getTranslation('flash_status_failed');
+          console.error("Flash failure:", err);
+        }).finally(() => {
+          this.setFlasherControlsDisabled(false);
+        });
+      });
+    }
+
+    if (this.dom.selectFlashFwVersion) {
+      this.dom.selectFlashFwVersion.addEventListener('change', () => this.updateFlashTexts());
+    }
+  }
+
+  /**
+   * Appelé lorsque le module de traduction signale que la langue a été modifiée.
+   */
+  onLanguageChanged(lang) {
+    this.updateConnectionUI(this.serial.isConnected, this.currentPortName);
+    this.renderTelemetryTable();
+    this.updateTrackersTable();
+    this.renderAtHelperList();
+    this.updateFlashTexts();
+  }
+
+  /**
+   * Gère l'activation/désactivation des éléments du flasheur pendant l'écriture.
+   */
+  setFlasherControlsDisabled(disabled) {
+    setElementDisabled(this.dom.btnFlash, disabled);
+    setElementDisabled(this.dom.selectBand, disabled);
+    setElementDisabled(this.dom.selectFlashFwVersion, disabled);
+  }
+
+  /**
+   * Synthèse vocale.
+   */
+  speak(text) {
+    if (!this.dom.chkVoiceAlerts || !this.dom.chkVoiceAlerts.checked) return;
+    if ('speechSynthesis' in window) {
+      const utterance = new SpeechSynthesisUtterance(text);
+      const currentLang = localStorage.getItem('nectar_lang') || 'fr';
+      utterance.lang = currentLang === 'fr' ? 'fr-FR' : 'en-US';
+      window.speechSynthesis.speak(utterance);
+    }
+  }
+
+  /**
+   * Loggue une ligne dans la console terminal de l'IHM.
+   */
+  logToTerminal(message, type = 'cmd-out') {
+    if (!this.dom.terminalLogs) return;
+    const div = document.createElement('div');
+    div.className = type;
+    div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+    this.dom.terminalLogs.appendChild(div);
+    
+    while (this.dom.terminalLogs.children.length > 500) {
+      this.dom.terminalLogs.removeChild(this.dom.terminalLogs.firstChild);
+    }
+    this.dom.terminalLogs.scrollTop = this.dom.terminalLogs.scrollHeight;
+  }
+
+  /**
+   * Met à jour les éléments de liaison série de l'IHM.
+   */
+  updateConnectionUI(connected, name = '') {
+    this.currentPortName = name;
+    const currentLang = localStorage.getItem('nectar_lang') || 'fr';
+    
+    if (this.dom.connBadge) {
+      this.dom.connBadge.textContent = connected ? getTranslation('badge_connected') : getTranslation('badge_disconnected');
+      this.dom.connBadge.className = connected ? 'badge connected' : 'badge disconnected';
+    }
+    if (this.dom.lblPortName) {
+      this.dom.lblPortName.textContent = connected ? getTranslation('conn_port_prefix') + name : getTranslation('conn_no_device');
+    }
+    
+    setElementDisabled(this.dom.btnConnect, connected);
+    setElementDisabled(this.dom.btnDisconnect, !connected);
+    setElementDisabled(this.dom.selectBaudrate, connected);
+
+    const disabledState = !connected;
+    setElementDisabled(this.dom.inputFreq, disabledState);
+    setElementDisabled(this.dom.selectSf, disabledState);
+    setElementDisabled(this.dom.selectBw, disabledState);
+    setElementDisabled(this.dom.selectCrc, disabledState);
+    setElementDisabled(this.dom.btnReadCfg, disabledState);
+    setElementDisabled(this.dom.btnWriteCfg, disabledState);
+    setElementDisabled(this.dom.btnSaveCfg, disabledState);
+    setElementDisabled(this.dom.btnResetCfg, disabledState);
+    setElementDisabled(this.dom.terminalInput, disabledState);
+    setElementDisabled(this.dom.btnSend, disabledState);
+    setElementDisabled(this.dom.btnListSd, disabledState);
+  }
+
+  /**
+   * Calcule périodiquement le débit série réel en réception (1Hz).
+   */
+  calculateThroughput() {
+    this.throughputHistory.push(this.bytesCountThisSecond);
+    if (this.throughputHistory.length > 30) {
+      this.throughputHistory.shift();
+    }
+    
+    const kbps = (this.bytesCountThisSecond * 8) / 1000.0;
+    if (this.dom.lblThroughput) {
+      const currentLang = localStorage.getItem('nectar_lang') || 'fr';
+      if (currentLang === 'fr') {
+        this.dom.lblThroughput.textContent = `${this.bytesCountThisSecond} octets/s (${kbps.toFixed(2)} kbps)`;
+      } else {
+        this.dom.lblThroughput.textContent = `${this.bytesCountThisSecond} bytes/s (${kbps.toFixed(2)} kbps)`;
+      }
+    }
+    
+    this.bytesCountThisSecond = 0;
+    this.updateThroughputChart();
+  }
+
+  /**
+   * Scanne les émetteurs actifs pour marquer comme LOST (perdu) ceux inactifs depuis plus de 15 secondes.
+   */
+  checkTrackersTimeout() {
+    const now = Date.now();
+    let statusChanged = false;
+    
+    Object.keys(this.activeTrackers).forEach(name => {
+      const tracker = this.activeTrackers[name];
+      if (!tracker.isLost && (now - tracker.lastSeen > 15000)) {
+        tracker.isLost = true;
+        statusChanged = true;
+        this.speak(getTranslation('voice_tracker_lost', { name: name.split('').join(' ') }));
+      }
+    });
+    
+    if (statusChanged) {
+      this.updateTrackersTable();
+    }
+  }
+
+  /**
+   * Traite et affiche le paquet décodé reçu depuis le module série (Interruption).
+   */
+  onPacketReceived(decoded) {
+    const { ssidType, ssidNum, apid, trackerName, missionTypeLabelKey } = decoded.header;
+    const { rssi, snr, timestamp: epoch } = decoded.metrics;
+    const payload = decoded.payload;
+    const payloadSize = payload.length;
+    
+    this.packetIndex++;
+
+    const timestamp = (epoch > 100000000) ? new Date(epoch * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
+    const crcHex = '0x' + decoded.crc.received.toString(16).toUpperCase().padStart(4, '0');
+
+    // 1. Ajouter à l'historique complet (export CSV)
+    this.allReceivedFrames.push({
+      index: this.packetIndex,
+      timestamp,
+      tracker: trackerName,
+      apid,
+      size: payloadSize,
+      payload: bytesToHex(payload),
+      rssi,
+      snr,
+      crcHex
+    });
+    if (this.allReceivedFrames.length > 5000) {
+      this.allReceivedFrames.shift();
+    }
+
+    // 2. Statistiques en direct et Graphiques
+    if (this.dom.statRssi) this.dom.statRssi.textContent = `${rssi} dBm`;
+    if (this.dom.statSnr) this.dom.statSnr.textContent = `${snr} dB`;
+    if (this.dom.statCount) {
+      this.dom.statCount.textContent = `${this.packetIndex} / ${this.crcErrorsCount}`;
+    }
+
+    this.rssiHistory.push({ value: rssi, time: timestamp });
+    if (this.rssiHistory.length > this.maxChartPoints) this.rssiHistory.shift();
+
+    this.snrHistory.push({ value: snr, time: timestamp });
+    if (this.snrHistory.length > this.maxChartPoints) this.snrHistory.shift();
+
+    this.drawSignalCharts();
+    this.renderTelemetryTable();
+
+    // 3. Classification du tracker actif
+    const isNew = !this.activeTrackers[trackerName];
+    if (isNew) {
+      this.activeTrackers[trackerName] = {
+        name: trackerName,
+        typeLabelKey: missionTypeLabelKey,
+        lastApid: apid,
+        packetCount: 0,
+        lastSeen: Date.now(),
+        lastPayloadHex: bytesToHex(payload),
+        lastRssi: rssi,
+        lastSnr: snr,
+        isLost: false
+      };
+      this.speak(getTranslation('voice_new_tracker', { name: trackerName.split('').join(' ') }));
+    } else {
+      if (this.activeTrackers[trackerName].isLost) {
+        this.activeTrackers[trackerName].isLost = false;
+        this.speak(getTranslation('voice_tracker_back', { name: trackerName.split('').join(' ') }));
+      }
+    }
+
+    // Mise à jour des stats du tracker
+    this.activeTrackers[trackerName].lastApid = apid;
+    this.activeTrackers[trackerName].packetCount++;
+    this.activeTrackers[trackerName].lastSeen = Date.now();
+    this.activeTrackers[trackerName].lastPayloadHex = bytesToHex(payload);
+    this.activeTrackers[trackerName].lastRssi = rssi;
+    this.activeTrackers[trackerName].lastSnr = snr;
+
+    // 4. Décodage WASP conditionnel (29 octets LoRa)
+    if (this.dom.chkWaspDecoding && this.dom.chkWaspDecoding.checked && payloadSize === 29) {
+      try {
+        const waspData = decodeWaspPayload(payload);
+        const isNewWasp = !this.waspTrackersData[trackerName];
+
+        // Limitation stricte à 10 trackers WASP max
+        if (isNewWasp && Object.keys(this.waspTrackersData).length >= 10) {
+          let oldestTrackerName = "";
+          let oldestTime = Infinity;
+
+          Object.keys(this.waspTrackersData).forEach(name => {
+            const lastSeen = this.activeTrackers[name] ? this.activeTrackers[name].lastSeen : 0;
+            if (lastSeen < oldestTime && name !== this.activeWaspTrackerName) {
+              oldestTime = lastSeen;
+              oldestTrackerName = name;
+            }
+          });
+
+          if (oldestTrackerName) {
+            this.map.removeTracker(oldestTrackerName);
+            delete this.waspTrackersData[oldestTrackerName];
+            
+            if (this.dom.selectWaspTracker) {
+              const optionToRemove = Array.from(this.dom.selectWaspTracker.options).find(opt => opt.value === oldestTrackerName);
+              if (optionToRemove) {
+                this.dom.selectWaspTracker.removeChild(optionToRemove);
+              }
             }
           }
         }
-      }
 
-      // Stocker les données pour cet émetteur spécifique
-      waspTrackersData[trackerName] = {
-        id: waspId,
-        apid: waspApid,
-        type: waspType,
-        utc: waspUtc,
-        lat: waspLat,
-        lon: waspLon,
-        alt: waspAlt,
-        spd: waspSpd,
-        cog: waspCog,
-        vbat: waspVbat / 1000.0,
-        temp: waspTemp / 100.0,
-        gpsFix: gpsFix,
-        numSats: numSats,
-        rssi: rssi,
-        snr: snr
-      };
-      
-      // Mettre à jour ou ajouter l'option dans le menu déroulant select-wasp-tracker
-      const selectWaspTracker = document.getElementById('select-wasp-tracker');
-      if (selectWaspTracker) {
-        if (isNewWaspTracker) {
-          if (Object.keys(waspTrackersData).length === 1) {
-            selectWaspTracker.innerHTML = '';
-          }
-          
-          const opt = document.createElement('option');
-          opt.value = trackerName;
-          opt.textContent = `${trackerName} (APID: ${waspApid})`;
-          selectWaspTracker.appendChild(opt);
-          
-          if (!activeWaspTrackerName) {
-            activeWaspTrackerName = trackerName;
-            selectWaspTracker.value = trackerName;
+        // Enregistrement des données WASP
+        this.waspTrackersData[trackerName] = {
+          id: ssidNum,
+          apid: apid,
+          type: ssidType,
+          utc: waspData.utc,
+          lat: waspData.lat,
+          lon: waspData.lon,
+          alt: waspData.alt,
+          spd: waspData.spd,
+          cog: waspData.cog,
+          vbat: waspData.vbat,
+          temp: waspData.temp,
+          gpsFix: waspData.gpsFix,
+          numSats: waspData.numSats,
+          rssi,
+          snr
+        };
+
+        // Remplissage du sélecteur IHM de trackers
+        if (this.dom.selectWaspTracker) {
+          if (isNewWasp) {
+            if (Object.keys(this.waspTrackersData).length === 1) {
+              this.dom.selectWaspTracker.innerHTML = '';
+            }
+            const opt = document.createElement('option');
+            opt.value = trackerName;
+            opt.textContent = `${trackerName} (APID: ${apid})`;
+            this.dom.selectWaspTracker.appendChild(opt);
+
+            if (!this.activeWaspTrackerName) {
+              this.activeWaspTrackerName = trackerName;
+              this.dom.selectWaspTracker.value = trackerName;
+            }
           }
         }
-      }
-      
-      // Gestion de la trajectoire et affichage carte via NectarMap
-      if (waspLat !== 0 && waspLon !== 0 && Math.abs(waspLat) <= 90 && Math.abs(waspLon) <= 180) {
-        if (waspMap) {
-          waspMap.updateTrackerPosition(trackerName, {
-            lat: waspLat,
-            lon: waspLon,
-            alt: waspAlt,
-            spd: waspSpd,
-            cog: waspCog,
-            gpsFix: gpsFix,
-            utc: waspUtc,
-            apid: waspApid
-          }, activeWaspTrackerName);
+
+        // Trace sur la carte Leaflet
+        if (waspData.lat !== 0 && waspData.lon !== 0 && Math.abs(waspData.lat) <= 90 && Math.abs(waspData.lon) <= 180) {
+          this.map.updateTrackerPosition(trackerName, {
+            lat: waspData.lat,
+            lon: waspData.lon,
+            alt: waspData.alt,
+            spd: waspData.spd,
+            cog: waspData.cog,
+            gpsFix: waspData.gpsFix,
+            utc: waspData.utc,
+            apid: apid
+          }, this.activeWaspTrackerName);
         }
+
+        // Mise à jour du cockpit si c'est le tracker sélectionné
+        if (trackerName === this.activeWaspTrackerName) {
+          this.updateWaspCockpit(trackerName);
+        }
+      } catch (e) {
+        console.error("WASP payload decode error:", e);
+        this.logToTerminal(`⚠️ Erreur Décodeur WASP : ${e.message}`, "sys-out");
       }
+    }
+
+    this.updateTrackersTable();
+  }
+
+  /**
+   * Traite les lignes textuelles reçues du périphérique (Echo AT, SD Dump).
+   */
+  onLineReceived(lineText) {
+    if (lineText === "+DUMP: START") {
+      this.isDownloadingSdFile = true;
+      this.sdDownloadBuffer = [];
+      this.sdDownloadLinesCount = 0;
+      return;
+    }
+    
+    if (lineText === "+DUMP: END") {
+      this.isDownloadingSdFile = false;
+      this.finishSdFileDownload();
+      return;
+    }
+
+    if (this.isDownloadingSdFile) {
+      this.sdDownloadBuffer.push(lineText);
+      this.sdDownloadLinesCount++;
       
-      // Si cet émetteur est celui sélectionné pour l'affichage, rafraîchir le cockpit
-      if (trackerName === activeWaspTrackerName) {
-        updateWaspCockpit(trackerName);
+      const approxBytes = this.sdDownloadLinesCount * 60; // 60 octets par ligne en moyenne
+      let percent = Math.min(99, Math.round((approxBytes / this.sdDownloadSize) * 100));
+      if (isNaN(percent) || percent < 0) percent = 50;
+      this.updateSdProgress(percent);
+      return;
+    }
+
+    // Affichage classique dans la console
+    this.logToTerminal(lineText, 'cmd-out');
+    this.parseATResponse(lineText);
+  }
+
+  /**
+   * Décode les retours d'interrogations de commandes AT pour synchroniser les inputs de l'IHM.
+   */
+  parseATResponse(line) {
+    if (line.startsWith("+FREQ:")) {
+      const val = parseFloat(line.split(":")[1]);
+      if (this.dom.inputFreq && !isNaN(val)) {
+        this.dom.inputFreq.value = val.toFixed(3);
+        this.currentConfig.frequency = val;
       }
-    } catch (e) {
-      console.error("Erreur de décodage de la charge utile WASP:", e);
-      logToTerminal("⚠️ Erreur Décodeur WASP : " + e.message + " | " + e.stack.split('\n')[0], "sys-out");
+    } else if (line.startsWith("+SF:")) {
+      const val = parseInt(line.split(":")[1], 10);
+      if (this.dom.selectSf && !isNaN(val)) {
+        this.dom.selectSf.value = val.toString();
+        this.currentConfig.sf = val;
+      }
+    } else if (line.startsWith("+BW:")) {
+      const val = parseFloat(line.split(":")[1]);
+      if (this.dom.selectBw && !isNaN(val)) {
+        this.dom.selectBw.value = val.toString();
+        this.currentConfig.bw = val;
+      }
+    } else if (line.startsWith("+CRC:")) {
+      const val = parseInt(line.split(":")[1], 10);
+      if (this.dom.selectCrc && !isNaN(val)) {
+        this.dom.selectCrc.value = val.toString();
+      }
+    } else if (line.startsWith("+LIST:")) {
+      // Format attendu : +LIST:file_name.csv,file_size_bytes
+      const parts = line.split(":")[1].split(",");
+      if (parts.length === 2) {
+        const name = parts[0].trim();
+        const size = parseInt(parts[1].trim(), 10);
+        this.addSdFileToList(name, size);
+      }
     }
   }
 
-  // Mettre à jour les indicateurs
-  if (statCount) {
-    statCount.textContent = packetIndex;
-  }
-  if (statRssi) {
-    statRssi.textContent = `${rssi}`;
-  }
-  if (statSnr) {
-    statSnr.textContent = `${snr}`;
-  }
-}
-
-// Met à jour la table des trackers actifs
-function updateTrackersTable() {
-  const tableBody = document.querySelector('#table-trackers tbody');
-  const rowEmptyTrackers = document.getElementById('row-empty-trackers');
-  if (!tableBody) return;
-
-  const names = Object.keys(activeTrackers).sort();
-  
-  if (names.length > 0 && rowEmptyTrackers) {
-    rowEmptyTrackers.style.display = 'none';
-  }
-
-  const now = Date.now();
-
-  names.forEach(name => {
-    const tracker = activeTrackers[name];
-    let row = document.getElementById(`tracker-row-${name}`);
+  /**
+   * Démarre la lecture dynamique du téléchargement SD.
+   */
+  startSdFileDownload(filename, size) {
+    this.sdDownloadFilename = filename;
+    this.sdDownloadSize = size;
+    this.sdDownloadBuffer = [];
+    this.sdDownloadLinesCount = 0;
     
-    // Si pas de signal depuis 15 secondes, le tracker est marqué PERDU
-    const isLost = (now - tracker.lastSeen) > 15000;
+    this.logToTerminal(getTranslation('log_sd_download_start', { file: filename }), 'sys-out');
+    this.serial.sendSerialText(`AT+DUMP=${filename}`);
+  }
+
+  /**
+   * Finalise le téléchargement d'un log SD et déclenche son enregistrement dans le navigateur.
+   */
+  finishSdFileDownload() {
+    this.updateSdProgress(100);
+    this.logToTerminal(getTranslation('log_sd_download_success', { file: this.sdDownloadFilename, lines: this.sdDownloadLinesCount }), 'sys-out');
     
-    if (isLost && !tracker.isLost) {
-      tracker.isLost = true;
-      speak(getTranslation('voice_tracker_lost', { name: name.split('').join(' ') }));
+    const csvContent = this.sdDownloadBuffer.join("\n");
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", this.sdDownloadFilename.replace(new RegExp('/', 'g'), '_'));
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+    
+    // Dissimulation de la barre de progression après 2 secondes
+    setTimeout(() => {
+      const progressContainer = document.getElementById('sd-progress-container');
+      if (progressContainer) {
+        progressContainer.style.display = 'none';
+      }
+    }, 2000);
+  }
+
+  /**
+   * Met à jour visuellement la barre de progression du téléchargement SD.
+   */
+  updateSdProgress(percent) {
+    const progressContainer = document.getElementById('sd-progress-container');
+    const progressBar = document.getElementById('sd-progress-bar');
+    const percentText = document.getElementById('lbl-sd-progress-percent');
+    
+    if (progressContainer) progressContainer.style.display = 'block';
+    if (progressBar) progressBar.style.width = `${percent}%`;
+    if (percentText) percentText.textContent = `${percent}%`;
+  }
+
+  /**
+   * Ajoute un fichier SD listé dans le tableau HTML.
+   */
+  addSdFileToList(filename, size) {
+    const tableBody = document.querySelector('#table-sd-files tbody');
+    const rowEmpty = document.getElementById('row-empty-sd-files');
+    if (rowEmpty) {
+      rowEmpty.style.display = 'none';
     }
     
-    const statusText = isLost ? getTranslation('status_lost') : getTranslation('status_active');
-    const statusClass = isLost ? 'badge disconnected' : 'badge connected';
-    
-    const timeString = new Date(tracker.lastSeen).toLocaleTimeString();
-
+    const rowId = `sd-file-row-${filename.replace(new RegExp('/', 'g'), '_').replace(new RegExp('\\.', 'g'), '_')}`;
+    let row = document.getElementById(rowId);
     if (!row) {
       row = document.createElement('tr');
-      row.id = `tracker-row-${name}`;
-      tableBody.appendChild(row);
+      row.id = rowId;
+      row.style.borderBottom = '1px solid rgba(255, 255, 255, 0.05)';
+      
+      const tdName = document.createElement('td');
+      tdName.textContent = filename;
+      tdName.style.padding = '0.5rem';
+      row.appendChild(tdName);
+      
+      const tdSize = document.createElement('td');
+      tdSize.textContent = (size / 1024).toFixed(2) + ' KB';
+      tdSize.style.padding = '0.5rem';
+      row.appendChild(tdSize);
+      
+      const tdAction = document.createElement('td');
+      tdAction.style.padding = '0.5rem';
+      const btn = document.createElement('button');
+      btn.className = 'btn primary small';
+      btn.textContent = getTranslation('sd_download_btn');
+      btn.addEventListener('click', () => this.startSdFileDownload(filename, size));
+      tdAction.appendChild(btn);
+      row.appendChild(tdAction);
+      
+      if (tableBody) tableBody.appendChild(row);
     }
-    
-    row.innerHTML = `
-      <td><span class="badge connected">${name}</span></td>
-      <td>${getTranslation(tracker.typeLabelKey)}</td>
-      <td>${tracker.lastApid}</td>
-      <td>${tracker.packetCount}</td>
-      <td>${timeString}</td>
-      <td><span class="${statusClass}">${statusText}</span></td>
-      <td style="font-family: var(--font-mono); font-weight: bold; color: var(--color-cyan);">${tracker.lastRssi} dBm / ${tracker.lastSnr} dB</td>
-    `;
-  });
-}
-
-// Vérifie si des trackers sont hors ligne
-function checkTrackersTimeout() {
-  if (Object.keys(activeTrackers).length === 0) return;
-  updateTrackersTable();
-}
-
-// Analyse des réponses textuelles AT
-function parseATResponse(line) {
-  if (line.startsWith('+LIST:')) {
-    const val = line.substring(6).trim();
-    const parts = val.split(',');
-    if (parts.length === 2) {
-      const filename = parts[0];
-      const size = parseInt(parts[1], 10);
-      addSdFileToList(filename, size);
-    }
-    return;
   }
 
-  // Ligne de boot : "[CONFIG] Loaded from NVS: Freq=869.525 MHz, SF=8, BW=250.0 kHz, CRC=ON (Mode=CCITT)"
-  if (line.includes('Loaded from NVS:')) {
-    const match = line.match(/Freq=([\d.]+)\s*MHz,\s*SF=(\d+),\s*BW=([\d.]+)\s*kHz,\s*CRC=(ON|OFF)(?:\s*\(Mode=(CCITT|IBM)\))?/i);
-    if (match) {
-      const freq = parseFloat(match[1]);
-      const sf = parseInt(match[2], 10);
-      const bw = parseFloat(match[3]);
-      const crcEnabled = match[4].toUpperCase() === 'ON';
-      const crcMode = match[5] ? match[5].toUpperCase() : 'CCITT';
-      
-      currentConfig.frequency = freq;
-      currentConfig.sf = sf;
-      currentConfig.bw = bw;
-      
-      if (inputFreq) inputFreq.value = freq.toFixed(3);
-      if (selectSf) selectSf.value = sf.toString();
-      if (selectBw) selectBw.value = bw.toString();
-      if (selectCrc) {
-        if (!crcEnabled) selectCrc.value = "0";
-        else if (crcMode === 'IBM') selectCrc.value = "1,1";
-        else selectCrc.value = "1,0";
+  /**
+   * Exporte l'historique de télémétrie en CSV.
+   */
+  exportTelemetryToCSV() {
+    if (this.allReceivedFrames.length === 0) {
+      alert(getTranslation('alert_no_frames_export'));
+      return;
+    }
+    
+    let csvRows = ["Index,Horodatage,Tracker,APID,Taille(octets),RSSI(dBm),SNR(dB),ChargeUtileHex"];
+    this.allReceivedFrames.forEach(f => {
+      csvRows.push(`${f.index},${f.timestamp},${f.tracker},${f.apid},${f.size},${f.rssi},${f.snr},${f.payload}`);
+    });
+    
+    const csvString = csvRows.join("\n");
+    const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const timeStr = new Date().toTimeString().slice(0, 8).replace(/:/g, '-');
+    link.setAttribute("download", `nectar_telemetry_${dateStr}_${timeStr}.csv`);
+    
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  /**
+   * Construit la liste AT de l'IHM.
+   */
+  renderAtHelperList() {
+    const container = document.getElementById('at-helper-list');
+    if (!container) return;
+    container.innerHTML = '';
+    
+    const AT_COMMANDS_HELP = [
+      { cmd: "AT", descKey: "at_desc_at" },
+      { cmd: "AT+HELP", descKey: "at_desc_help" },
+      { cmd: "AT+INFO", descKey: "at_desc_info" },
+      { cmd: "AT+FREQ?", descKey: "at_desc_freq_get" },
+      { cmd: "AT+FREQ=", descKey: "at_desc_freq_set" },
+      { cmd: "AT+SF?", descKey: "at_desc_sf_get" },
+      { cmd: "AT+SF=", descKey: "at_desc_sf_set" },
+      { cmd: "AT+BW?", descKey: "at_desc_bw_get" },
+      { cmd: "AT+BW=", descKey: "at_desc_bw_set" },
+      { cmd: "AT+CRC?", descKey: "at_desc_crc_get" },
+      { cmd: "AT+CRC=", descKey: "at_desc_crc_set" },
+      { cmd: "AT+FMT?", descKey: "at_desc_fmt_get" },
+      { cmd: "AT+FMT=", descKey: "at_desc_fmt_set" },
+      { cmd: "AT+TIME?", descKey: "at_desc_time_get" },
+      { cmd: "AT+TIME=", descKey: "at_desc_time_set" },
+      { cmd: "AT+RSSI?", descKey: "at_desc_rssi_get" },
+      { cmd: "AT+SNR?", descKey: "at_desc_snr_get" },
+      { cmd: "AT+SIG?", descKey: "at_desc_sig_get" },
+      { cmd: "AT+ERR?", descKey: "at_desc_err_get" },
+      { cmd: "AT+CFG", descKey: "at_desc_cfg" },
+      { cmd: "AT+LIST", descKey: "at_desc_list" },
+      { cmd: "AT+DUMP=", descKey: "at_desc_dump" },
+      { cmd: "AT+SAVE", descKey: "at_desc_save" },
+      { cmd: "AT+RESET", descKey: "at_desc_reset" }
+    ];
+
+    AT_COMMANDS_HELP.forEach(item => {
+      const el = document.createElement('div');
+      el.className = 'at-helper-item';
+      el.innerHTML = `
+        <span class="at-helper-cmd">${item.cmd}</span>
+        <span class="at-helper-desc">${getTranslation(item.descKey)}</span>
+      `;
+      el.addEventListener('click', () => {
+        if (this.dom.terminalInput) {
+          this.dom.terminalInput.value = item.cmd;
+          this.dom.terminalInput.focus();
+        }
+      });
+      container.appendChild(el);
+    });
+  }
+
+  /**
+   * Rplit le tableau de télémétrie.
+   */
+  renderTelemetryTable() {
+    if (!this.dom.tableTelemetryBody) return;
+    this.dom.tableTelemetryBody.innerHTML = '';
+    
+    if (this.allReceivedFrames.length === 0) {
+      if (this.dom.rowEmpty) {
+        this.dom.rowEmpty.style.display = 'table-row';
+        this.dom.tableTelemetryBody.appendChild(this.dom.rowEmpty);
       }
       return;
     }
-  }
-
-  // Fréquence : "+FREQ: <valeur>" ou rapport "Frequency (Active): <valeur> MHz"
-  if (line.startsWith('+FREQ:')) {
-    const val = parseFloat(line.split(':')[1]);
-    currentConfig.frequency = val;
-    if (inputFreq) inputFreq.value = val.toFixed(3);
-  } else if (line.includes('Frequency (Active):')) {
-    const val = parseFloat(line.split(':')[1]);
-    currentConfig.frequency = val;
-    if (inputFreq) inputFreq.value = val.toFixed(3);
-  }
-  // Spreading Factor : "+SF: <valeur>" ou rapport "Spreading Factor  : <valeur>"
-  else if (line.startsWith('+SF:')) {
-    const val = parseInt(line.split(':')[1], 10);
-    currentConfig.sf = val;
-    if (selectSf) selectSf.value = val.toString();
-  } else if (line.includes('Spreading Factor')) {
-    const val = parseInt(line.split(':')[1], 10);
-    currentConfig.sf = val;
-    if (selectSf) selectSf.value = val.toString();
-  }
-  // Bande Passante : "+BW: <valeur>" ou rapport "Bandwidth         : <valeur> kHz"
-  else if (line.startsWith('+BW:')) {
-    const val = parseFloat(line.split(':')[1]);
-    currentConfig.bw = val;
-    if (selectBw) {
-      selectBw.value = val.toString();
-    }
-  } else if (line.includes('Bandwidth')) {
-    const val = parseFloat(line.split(':')[1]);
-    currentConfig.bw = val;
-    if (selectBw) {
-      selectBw.value = val.toString();
-    }
-  }
-  // CRC : "+CRC: <valeur>" ou rapport "Hardware CRC      : <valeur>"
-  else if (line.startsWith('+CRC:')) {
-    const val = line.split(':')[1].trim();
-    if (selectCrc) {
-      if (val.startsWith('0')) {
-        selectCrc.value = "0";
-      } else if (val === '1,1') {
-        selectCrc.value = "1,1";
-      } else {
-        selectCrc.value = "1,0";
-      }
-    }
-  } else if (line.includes('Hardware CRC')) {
-    const val = line.split(':')[1].trim();
-    if (selectCrc) {
-      if (val.includes('OFF')) {
-        selectCrc.value = "0";
-      } else if (val.includes('IBM')) {
-        selectCrc.value = "1,1";
-      } else {
-        selectCrc.value = "1,0";
-      }
-    }
-  }
-}
-
-// ============================================================================
-// Dessin du graphique temps réel (SVG)
-// ============================================================================
-function updateThroughputChart() {
-  const now = Date.now();
-  const elapsed = now - lastThroughputCalculation;
-  
-  if (elapsed >= 1000) {
-    const dataRate = Math.round((bytesCountThisSecond * 1000) / elapsed);
-    bytesCountThisSecond = 0;
-    lastThroughputCalculation = now;
     
-    // Mettre à jour l'indicateur de débit
-    if (lblThroughput) {
-      lblThroughput.textContent = `${dataRate} B/s`;
+    if (this.dom.rowEmpty) {
+      this.dom.rowEmpty.style.display = 'none';
     }
     
-    // Vérifier les timeouts des trackers
-    checkTrackersTimeout();
-  }
-}
-
-function drawSignalCharts() {
-  drawSingleChart('rssi-chart-line', 'rssi-chart-fill', rssiHistory, -120, 0);
-  drawSingleChart('snr-chart-line', 'snr-chart-fill', snrHistory, -20, 20);
-  
-  // Mettre à jour les indicateurs de temps
-  const lblRssiTime = document.getElementById('chart-rssi-time');
-  if (lblRssiTime) {
-    if (rssiHistory.length > 0) {
-      lblRssiTime.textContent = rssiHistory.length === 1 
-        ? rssiHistory[0].time 
-        : `${rssiHistory[0].time} ➔ ${rssiHistory[rssiHistory.length - 1].time}`;
-    } else {
-      lblRssiTime.textContent = '--:--:--';
-    }
-  }
-
-  const lblSnrTime = document.getElementById('chart-snr-time');
-  if (lblSnrTime) {
-    if (snrHistory.length > 0) {
-      lblSnrTime.textContent = snrHistory.length === 1 
-        ? snrHistory[0].time 
-        : `${snrHistory[0].time} ➔ ${snrHistory[snrHistory.length - 1].time}`;
-    } else {
-      lblSnrTime.textContent = '--:--:--';
-    }
-  }
-}
-
-function drawSingleChart(lineId, fillId, history, minVal, maxVal) {
-  const chartLine = document.getElementById(lineId);
-  const chartFill = document.getElementById(fillId);
-  if (!chartLine || !chartFill) return;
-  
-  const width = 300;
-  const height = 100;
-  const pointsCount = history.length;
-  
-  if (pointsCount === 0) {
-    chartLine.setAttribute('d', '');
-    chartFill.setAttribute('d', 'M 0 100 L 300 100 Z');
-    return;
-  }
-  
-  let dLine = '';
-  
-  for (let i = 0; i < pointsCount; i++) {
-    const x = (i / (maxChartPoints - 1)) * width;
-    
-    const val = history[i].value;
-    const clampedVal = Math.max(minVal, Math.min(maxVal, val));
-    const y = height - ((clampedVal - minVal) / (maxVal - minVal)) * (height - 10) - 5;
-    
-    if (i === 0) {
-      dLine += `M ${x} ${y}`;
-    } else {
-      dLine += ` L ${x} ${y}`;
-    }
-  }
-  
-  const firstX = 0;
-  const lastX = ((pointsCount - 1) / (maxChartPoints - 1)) * width;
-  const dFill = `${dLine} L ${lastX} ${height} L ${firstX} ${height} Z`;
-  
-  chartLine.setAttribute('d', dLine);
-  chartFill.setAttribute('d', dFill);
-}
-
-// Démarrer le ticker de statistiques chaque seconde
-setInterval(updateThroughputChart, 1000);
-
-// ============================================================================
-// Événements des boutons de Configuration
-// ============================================================================
-if (btnReadCfg) {
-  btnReadCfg.addEventListener('click', async () => {
-    const currentEpoch = Math.floor(Date.now() / 1000);
-    await sendSerialText(`AT+TIME=${currentEpoch}`);
-    await sendSerialText('AT+FREQ?');
-    await sendSerialText('AT+SF?');
-    await sendSerialText('AT+BW?');
-    await sendSerialText('AT+CRC?');
-  });
-}
-
-if (btnWriteCfg) {
-  btnWriteCfg.addEventListener('click', async () => {
-    const freq = inputFreq ? parseFloat(inputFreq.value) : NaN;
-    const sf = selectSf ? parseInt(selectSf.value, 10) : NaN;
-    const bw = selectBw ? parseFloat(selectBw.value) : NaN;
-    const crcVal = selectCrc ? selectCrc.value : null;
-    
-    if (!isNaN(freq)) await sendSerialText(`AT+FREQ=${freq.toFixed(3)}`);
-    if (!isNaN(sf)) await sendSerialText(`AT+SF=${sf}`);
-    if (!isNaN(bw)) await sendSerialText(`AT+BW=${bw.toFixed(1)}`);
-    if (crcVal) await sendSerialText(`AT+CRC=${crcVal}`);
-  });
-}
-
-if (btnSaveCfg) {
-  btnSaveCfg.addEventListener('click', () => {
-    sendSerialText('AT+SAVE');
-  });
-}
-
-if (btnResetCfg) {
-  btnResetCfg.addEventListener('click', () => {
-    if (confirm("Voulez-vous restaurer les paramètres d'usine ? La carte va redémarrer.")) {
-      sendSerialText('AT+RESET');
-    }
-  });
-}
-
-if (terminalForm) {
-  terminalForm.addEventListener('submit', (e) => {
-    e.preventDefault();
-    if (terminalInput) {
-      const cmd = terminalInput.value.trim();
-      if (cmd) {
-        sendSerialText(cmd);
-        terminalInput.value = '';
-      }
-    }
-  });
-}
-
-// Exporte les trames enregistrées en CSV
-function exportTelemetryToCSV() {
-  if (allReceivedFrames.length === 0) {
-    alert(getTranslation('alert_no_frames_export'));
-    return;
-  }
-  
-  let csvRows = ["Index,Horodatage,Tracker,APID,Taille(octets),RSSI(dBm),SNR(dB),ChargeUtileHex"];
-  allReceivedFrames.forEach(f => {
-    csvRows.push(`${f.index},${f.timestamp},${f.tracker},${f.apid},${f.size},${f.rssi},${f.snr},${f.payload}`);
-  });
-  
-  const csvString = csvRows.join("\n");
-  const blob = new Blob([csvString], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const timeStr = new Date().toTimeString().slice(0, 8).replace(/:/g, '-');
-  link.setAttribute("download", `nectar_telemetry_${dateStr}_${timeStr}.csv`);
-  
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-// ============================================================================
-// Flasheur de Firmware Web (ESPTool)
-// ============================================================================
-async function flashFirmware() {
-  const band = selectBand ? selectBand.value : '868';
-  const fwVersion = selectFlashFwVersion ? selectFlashFwVersion.value : 'latest';
-  const verTag = fwVersion === 'latest' ? 'v1.6.2' : fwVersion;
-  const binUrl = `binaries/firmware_bluetooth_${band}_${verTag}.bin`;
-  
-  if (isConnected) {
-    alert(getTranslation('alert_monitor_active_disconnect'));
-    return;
-  }
-  
-  setElementDisabled(btnFlash, true);
-  setElementDisabled(selectBand, true);
-  setElementDisabled(selectFlashFwVersion, true);
-  if (flashProgressContainer) flashProgressContainer.classList.remove('hidden');
-  if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_connecting');
-  if (lblFlashPercent) lblFlashPercent.textContent = "0%";
-  if (flashProgressBar) flashProgressBar.style.width = "0%";
-  
-  let esploader = null;
-  let transport = null;
-  
-  const customTerminal = {
-    clean() {
-      if (terminalLogs) terminalLogs.innerHTML = '';
-    },
-    writeLine(data) {
-      logToTerminal(data, 'sys-out');
-    },
-    write(data) {
-      logToTerminal(data, 'sys-out');
-    }
-  };
-
-  try {
-    logToTerminal(getTranslation('log_flash_port_select'), "sys-out");
-    const flashPort = await navigator.serial.requestPort();
-    
-    transport = new Transport(flashPort, true);
-    
-    esploader = new ESPLoader({
-      transport: transport,
-      terminal: customTerminal,
-      baudrate: 115200 // vitesse de synchronisation bootloader
+    const framesToShow = this.allReceivedFrames.slice(-50).reverse();
+    framesToShow.forEach(f => {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${f.index}</td>
+        <td>${f.timestamp}</td>
+        <td><span class="badge connected">${f.tracker}</span></td>
+        <td>${f.apid}</td>
+        <td>${f.size} ${getTranslation('unit_bytes')}</td>
+        <td>${f.rssi} dBm</td>
+        <td>${f.snr} dB</td>
+        <td><span style="font-family: var(--font-mono); color: var(--color-success); font-weight: 600; white-space: nowrap;">✔ ${f.crcHex}</span></td>
+        <td style="font-family: var(--font-mono); color: var(--color-cyan); word-break: break-all;">${f.payload}</td>
+      `;
+      this.dom.tableTelemetryBody.appendChild(tr);
     });
-    
-    if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_syncing');
-    await esploader.main();
-    
-    if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_chip', { chip: esploader.chipName });
-    logToTerminal(getTranslation('log_download_bin', { url: binUrl }), "sys-out");
-    
-    const response = await fetch(binUrl + '?t=' + Date.now());
-    if (!response.ok) {
-      throw new Error(getTranslation('log_download_bin_failed', { status: response.statusText }) || `Impossible de récupérer le binaire (${response.statusText})`);
-    }
-    
-    const arrayBuffer = await response.arrayBuffer();
-    const firmwareData = new Uint8Array(arrayBuffer);
-    
-    if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_writing');
-    logToTerminal(getTranslation('log_write_flash_start'), "sys-out");
-    
-    const fileArray = [
-      { data: firmwareData, address: 0x10000 }
-    ];
-    
-    await esploader.writeFlash({
-      fileArray: fileArray,
-      flashSize: 'keep',
-      flashMode: 'keep',
-      flashFreq: 'keep',
-      eraseAll: false,
-      compress: true,
-      reportProgress: (fileIndex, written, total) => {
-        const percent = Math.round((written / total) * 100);
-        if (lblFlashPercent) lblFlashPercent.textContent = `${percent}%`;
-        if (flashProgressBar) flashProgressBar.style.width = `${percent}%`;
-      }
-    });
-    
-    if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_success');
-    logToTerminal(getTranslation('log_update_complete_reboot'), "sys-out");
-    
-    // Redémarrer la carte matériellement
-    await transport.setDTR(false);
-    await new Promise(resolve => setTimeout(resolve, 100));
-    await transport.setDTR(true);
-    
-  } catch (err) {
-    if (lblFlashStatus) lblFlashStatus.textContent = getTranslation('flash_status_failed');
-    logToTerminal(getTranslation('log_flash_error', { message: err.message }), 'sys-out');
-    console.error(err);
-  } finally {
-    if (transport) {
-      try {
-        await transport.disconnect();
-      } catch (err) {}
-    }
-    setElementDisabled(btnFlash, false);
-    setElementDisabled(selectBand, false);
-    setElementDisabled(selectFlashFwVersion, false);
   }
-}
 
-// ============================================================================
-// Événements d'Initialisation
-// ============================================================================
-if (btnConnect) btnConnect.addEventListener('click', connectSerial);
-if (btnDisconnect) btnDisconnect.addEventListener('click', disconnectSerial);
-if (btnFlash) btnFlash.addEventListener('click', flashFirmware);
-if (selectFlashFwVersion) selectFlashFwVersion.addEventListener('change', updateFlashTexts);
-
-// Événements de la carte SD
-if (btnListSd) {
-  btnListSd.addEventListener('click', async () => {
-    // Vider la liste précédente
-    const tableBody = document.querySelector('#table-sd-files tbody');
-    if (tableBody) {
-      tableBody.innerHTML = '';
-      const rowEmpty = document.createElement('tr');
-      rowEmpty.id = 'row-empty-sd-files';
-      rowEmpty.innerHTML = `<td colspan="3" class="text-center text-secondary" style="padding: 1rem 0; text-align: center;">${getTranslation('sd_files_empty')}</td>`;
-      tableBody.appendChild(rowEmpty);
-    }
-    await sendSerialText('AT+LIST');
-  });
-}
-
-function addSdFileToList(filename, size) {
-  const tableBody = document.querySelector('#table-sd-files tbody');
-  const rowEmpty = document.getElementById('row-empty-sd-files');
-  if (rowEmpty) {
-    rowEmpty.style.display = 'none';
-  }
-  
-  const rowId = `sd-file-row-${filename.replace(/\//g, '_').replace(/\./g, '_')}`;
-  let row = document.getElementById(rowId);
-  if (!row) {
-    row = document.createElement('tr');
-    row.id = rowId;
-    row.style.borderBottom = '1px solid rgba(255, 255, 255, 0.05)';
-    tableBody.appendChild(row);
-  }
-  
-  let sizeStr = `${size} B`;
-  if (size > 1024 * 1024) {
-    sizeStr = `${(size / (1024 * 1024)).toFixed(2)} MB`;
-  } else if (size > 1024) {
-    sizeStr = `${(size / 1024).toFixed(1)} KB`;
-  }
-  
-  const cleanName = filename.startsWith('/') ? filename.substring(1) : filename;
-  
-  row.innerHTML = `
-    <td style="padding: 0.5rem; font-family: var(--font-mono);">${cleanName}</td>
-    <td style="padding: 0.5rem;">${sizeStr}</td>
-    <td style="padding: 0.5rem; text-align: right;">
-      <button class="btn btn-accent btn-sm btn-download-sd" data-filename="${filename}" style="padding: 0.2rem 0.5rem; font-size: 0.75rem; border-radius: 4px;">
-        ${getTranslation('sd_download_btn')}
-      </button>
-    </td>
-  `;
-  
-  const btn = row.querySelector('.btn-download-sd');
-  btn.addEventListener('click', () => {
-    startSdFileDownload(filename, size);
-  });
-}
-
-async function startSdFileDownload(filename, size) {
-  if (isDownloadingSdFile) return;
-  
-  isDownloadingSdFile = true;
-  sdDownloadFilename = filename;
-  sdDownloadSize = size;
-  sdDownloadBuffer = [];
-  sdDownloadLinesCount = 0;
-  
-  const container = document.getElementById('sd-download-progress-container');
-  if (container) container.classList.remove('hidden');
-  updateSdProgress(0);
-  
-  logToTerminal(getTranslation('log_sd_download_start', { file: filename }), 'sys-out');
-  await sendSerialText(`AT+DUMP=${filename}`);
-}
-
-function finishSdFileDownload() {
-  updateSdProgress(100);
-  logToTerminal(getTranslation('log_sd_download_success', { file: sdDownloadFilename, lines: sdDownloadLinesCount }), 'sys-out');
-  
-  setTimeout(() => {
-    const container = document.getElementById('sd-download-progress-container');
-    if (container) container.classList.add('hidden');
-  }, 2000);
-  
-  const csvContent = sdDownloadBuffer.join('\n');
-  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-  const url = URL.createObjectURL(blob);
-  
-  const link = document.createElement("a");
-  link.setAttribute("href", url);
-  
-  const cleanName = sdDownloadFilename.startsWith('/') ? sdDownloadFilename.substring(1) : sdDownloadFilename;
-  link.setAttribute("download", `downloaded_${cleanName}`);
-  
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-  
-  isDownloadingSdFile = false;
-}
-
-function updateSdProgress(percent) {
-  const bar = document.getElementById('sd-download-progress-bar');
-  const label = document.getElementById('lbl-sd-download-status');
-  if (bar) bar.style.width = `${percent}%`;
-  if (label) label.textContent = `${percent}%`;
-}
-
-// Nettoyage console
-if (btnClearTerminal) {
-  btnClearTerminal.addEventListener('click', () => {
-    if (terminalLogs) terminalLogs.innerHTML = '';
-  });
-}
-
-// Nettoyage télémétrie
-if (btnClearTelemetry) {
-  btnClearTelemetry.addEventListener('click', () => {
-    packetIndex = 0;
-    crcErrorsCount = 0;
-    allReceivedFrames = [];
-    if (statCount) statCount.textContent = '0';
-    if (statCrcErrors) statCrcErrors.textContent = '0';
-    if (tableTelemetryBody) {
-      tableTelemetryBody.innerHTML = '';
+  /**
+   * Fplit le tableau des trackers actifs.
+   */
+  updateTrackersTable() {
+    const tableBody = document.querySelector('#table-trackers tbody');
+    const rowEmpty = document.getElementById('row-empty-trackers');
+    if (!tableBody) return;
+    
+    tableBody.innerHTML = '';
+    const keys = Object.keys(this.activeTrackers);
+    
+    if (keys.length === 0) {
       if (rowEmpty) {
         rowEmpty.style.display = 'table-row';
-        tableTelemetryBody.appendChild(rowEmpty);
+        tableBody.appendChild(rowEmpty);
       }
-    }
-    rssiHistory.length = 0;
-    snrHistory.length = 0;
-    drawSignalCharts();
-  });
-}
-
-// Export télémétrie CSV
-if (btnExportTelemetry) {
-  btnExportTelemetry.addEventListener('click', exportTelemetryToCSV);
-}
-
-// Réinitialisation des trackers
-if (btnClearTrackers) {
-  btnClearTrackers.addEventListener('click', () => {
-    activeTrackers = {};
-    const tableBody = document.querySelector('#table-trackers tbody');
-    const rowEmptyTrackers = document.getElementById('row-empty-trackers');
-    if (tableBody) {
-      tableBody.innerHTML = '';
-      if (rowEmptyTrackers) {
-        rowEmptyTrackers.style.display = 'table-row';
-        tableBody.appendChild(rowEmptyTrackers);
-      }
+      return;
     }
     
-    // Nettoyer la télémétrie WASP
-    waspTrackersData = {};
-    activeWaspTrackerName = "";
-    waspLastPos = null;
-    
-    // Supprimer tous les marqueurs de la carte Leaflet via le composant NectarMap
-    if (waspMap) {
-      waspMap.clear();
+    if (rowEmpty) {
+      rowEmpty.style.display = 'none';
     }
     
-    // Réinitialiser le cockpit et le sélecteur
-    updateWaspCockpit(null);
-    const selectWaspTracker = document.getElementById('select-wasp-tracker');
-    if (selectWaspTracker) {
-      selectWaspTracker.innerHTML = '<option value="" disabled selected>Attente émetteur...</option>';
-    }
-  });
-}
-
-// Détecter si le port a été déconnecté matériellement (câble arraché)
-navigator.serial?.addEventListener('disconnect', (event) => {
-  if (port && event.target === port) {
-    logToTerminal(getTranslation('log_physical_disconnect'), "sys-out");
-    disconnectSerial();
+    keys.forEach(key => {
+      const tracker = this.activeTrackers[key];
+      const tr = document.createElement('tr');
+      tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.05)';
+      
+      const lastSeenTime = new Date(tracker.lastSeen).toLocaleTimeString();
+      const statusClass = tracker.isLost ? 'badge disconnected' : 'badge connected';
+      const statusText = tracker.isLost ? getTranslation('status_lost') : getTranslation('status_active');
+      
+      tr.innerHTML = `
+        <td style="padding: 0.75rem;"><span class="badge connected">${tracker.name}</span></td>
+        <td style="padding: 0.75rem;">${getTranslation(tracker.typeLabelKey)}</td>
+        <td style="padding: 0.75rem;">${tracker.lastApid}</td>
+        <td style="padding: 0.75rem; font-weight: 600;">${tracker.packetCount}</td>
+        <td style="padding: 0.75rem;">${lastSeenTime}</td>
+        <td style="padding: 0.75rem;"><span class="${statusClass}">${statusText}</span></td>
+        <td style="padding: 0.75rem; font-family: var(--font-mono); color: var(--color-cyan); font-size: 0.85rem; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${tracker.lastPayloadHex}">${tracker.lastPayloadHex}</td>
+        <td style="padding: 0.75rem; font-weight: 600; white-space: nowrap;">${tracker.lastRssi} / ${tracker.lastSnr}</td>
+      `;
+      tableBody.appendChild(tr);
+    });
   }
+
+  /**
+   * Remplit les indicateurs Cockpit WASP.
+   */
+  updateWaspCockpit(trackerName) {
+    const data = this.waspTrackersData[trackerName];
+    
+    const txtAlt = document.getElementById('wasp-alt');
+    const txtSpd = document.getElementById('wasp-spd');
+    const txtSats = document.getElementById('wasp-sats');
+    const txtTemp = document.getElementById('wasp-temp');
+    const txtVbat = document.getElementById('wasp-vbat');
+    const txtSignal = document.getElementById('wasp-signal');
+    
+    if (!data) {
+      if (txtAlt) txtAlt.textContent = '--';
+      if (txtSpd) txtSpd.textContent = '--';
+      if (txtSats) txtSats.textContent = '--';
+      if (txtTemp) txtTemp.textContent = '--';
+      if (txtVbat) txtVbat.textContent = '--';
+      if (txtSignal) txtSignal.textContent = '--';
+      return;
+    }
+    
+    if (txtAlt) txtAlt.textContent = data.alt.toFixed(1) + ' m';
+    if (txtSpd) txtSpd.textContent = data.spd.toFixed(1) + ' km/h';
+    if (txtSats) txtSats.textContent = (data.gpsFix ? '🟢 ' : '🔴 ') + data.numSats;
+    if (txtTemp) txtTemp.textContent = data.temp.toFixed(2) + ' °C';
+    if (txtVbat) txtVbat.textContent = data.vbat.toFixed(2) + ' V';
+    if (txtSignal) txtSignal.textContent = `${data.rssi} / ${data.snr}`;
+  }
+
+  /**
+   * Met à jour le texte du flasheur en fonction de la version choisie.
+   */
+  updateFlashTexts() {
+    const fwVersion = this.dom.selectFlashFwVersion ? this.dom.selectFlashFwVersion.value : 'latest';
+    const verStr = fwVersion === 'v1.3.1' ? 'v1.3.1' : 'v1.6.2';
+    
+    const descEl = document.querySelector('[data-i18n="flash_desc"]');
+    if (descEl) {
+      const currentLang = localStorage.getItem('nectar_lang') || 'fr';
+      if (currentLang === 'fr') {
+        descEl.innerHTML = `Flashez directement la version <strong>${verStr}</strong> depuis votre navigateur par port USB.`;
+      } else {
+        descEl.innerHTML = `Flash version <strong>${verStr}</strong> directly from your browser via USB port.`;
+      }
+    }
+    
+    const btnEl = document.getElementById('btn-flash');
+    if (btnEl) {
+      const currentLang = localStorage.getItem('nectar_lang') || 'fr';
+      if (currentLang === 'fr') {
+        btnEl.textContent = `Flasher la carte (${verStr})`;
+      } else {
+        btnEl.textContent = `Flash Board (${verStr})`;
+      }
+    }
+  }
+
+  /**
+   * Dessine les graphiques SVG RSSI et SNR en direct.
+   */
+  drawSignalCharts() {
+    this.drawChart('chart-rssi-svg', this.rssiHistory, -130, -10, '#06b6d4', 'RSSI');
+    this.drawChart('chart-snr-svg', this.snrHistory, -20, 20, '#a855f7', 'SNR');
+  }
+
+  /**
+   * Dessine le graphique de débit SVG.
+   */
+  updateThroughputChart() {
+    const dataPoints = this.throughputHistory.map((val, idx) => ({ value: val, time: idx.toString() }));
+    const maxVal = Math.max(100, ...this.throughputHistory) * 1.1;
+    this.drawChart('chart-throughput-svg', dataPoints, 0, maxVal, '#10b981', 'Throughput');
+  }
+
+  /**
+   * Dessine un graphique linéaire en SVG pur pour un conteneur donné.
+   * @private
+   */
+  drawChart(svgId, history, minVal, maxVal, color, label) {
+    const svg = document.getElementById(svgId);
+    if (!svg) return;
+    
+    svg.innerHTML = '';
+    const width = svg.clientWidth || 300;
+    const height = svg.clientHeight || 120;
+    const padding = 15;
+    
+    if (history.length < 2) {
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', (width / 2).toString());
+      text.setAttribute('y', (height / 2).toString());
+      text.setAttribute('text-anchor', 'middle');
+      text.setAttribute('fill', 'rgba(255,255,255,0.3)');
+      text.setAttribute('font-size', '12px');
+      text.textContent = 'En attente de signal...';
+      svg.appendChild(text);
+      return;
+    }
+    
+    const getX = (index) => padding + (index / (this.maxChartPoints - 1)) * (width - 2 * padding);
+    const getY = (val) => {
+      const clamped = Math.max(minVal, Math.min(maxVal, val));
+      const ratio = (clamped - minVal) / (maxVal - minVal);
+      return height - padding - ratio * (height - 2 * padding);
+    };
+
+    // Dessin de la grille horizontale de repères
+    const gridLines = 3;
+    for (let i = 0; i <= gridLines; i++) {
+      const ratio = i / gridLines;
+      const yVal = minVal + ratio * (maxVal - minVal);
+      const yPos = getY(yVal);
+      
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', padding.toString());
+      line.setAttribute('y1', yPos.toString());
+      line.setAttribute('x2', (width - padding).toString());
+      line.setAttribute('y2', yPos.toString());
+      line.setAttribute('stroke', 'rgba(255,255,255,0.05)');
+      line.setAttribute('stroke-dasharray', '2,2');
+      svg.appendChild(line);
+      
+      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+      text.setAttribute('x', (padding + 2).toString());
+      text.setAttribute('y', (yPos - 2).toString());
+      text.setAttribute('fill', 'rgba(255,255,255,0.2)');
+      text.setAttribute('font-size', '8px');
+      text.textContent = Math.round(yVal).toString();
+      svg.appendChild(text);
+    }
+    
+    // Construction de la ligne de tracé
+    let points = [];
+    const startIndex = this.maxChartPoints - history.length;
+    
+    history.forEach((pt, idx) => {
+      const x = getX(startIndex + idx);
+      const y = getY(pt.value);
+      points.push(`${x},${y}`);
+    });
+    
+    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    path.setAttribute('d', `M ${points.join(' L ')}`);
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke', color);
+    path.setAttribute('stroke-width', '2');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('stroke-linejoin', 'round');
+    svg.appendChild(path);
+    
+    // Dégradé de fond sous la ligne
+    const areaPoints = [
+      `${getX(startIndex)},${height - padding}`,
+      ...points,
+      `${getX(this.maxChartPoints - 1)},${height - padding}`
+    ];
+    const area = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
+    area.setAttribute('points', areaPoints.join(' '));
+    area.setAttribute('fill', `url(#grad-${svgId})`);
+    
+    // Injection du gradient linéaire
+    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+    const grad = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
+    grad.setAttribute('id', `grad-${svgId}`);
+    grad.setAttribute('x1', '0%');
+    grad.setAttribute('y1', '0%');
+    grad.setAttribute('x2', '0%');
+    grad.setAttribute('y2', '100%');
+    
+    const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+    stop1.setAttribute('offset', '0%');
+    stop1.setAttribute('stop-color', color);
+    stop1.setAttribute('stop-opacity', '0.15');
+    grad.appendChild(stop1);
+    
+    const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
+    stop2.setAttribute('offset', '100%');
+    stop2.setAttribute('stop-color', color);
+    stop2.setAttribute('stop-opacity', '0.0');
+    grad.appendChild(stop2);
+    
+    defs.appendChild(grad);
+    svg.appendChild(defs);
+    svg.appendChild(area);
+  }
+}
+
+// Lancement automatique de l'application modulaire à la fin du chargement
+function setElementDisabled(el, disabled) {
+  if (el) el.disabled = disabled;
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  const app = new NectarApp();
+  app.init();
 });
-
-// Événements du sélecteur de langue
-const btnLangFr = document.getElementById('btn-lang-fr');
-const btnLangEn = document.getElementById('btn-lang-en');
-if (btnLangFr) btnLangFr.addEventListener('click', () => setLanguage('fr'));
-if (btnLangEn) btnLangEn.addEventListener('click', () => setLanguage('en'));
-
-// Initialisation de la carte Leaflet WASP (sans marqueur par défaut)
-function initWaspMap() {
-  if (waspMap) {
-    waspMap.init();
-  }
-}
-
-// Fonction de mise à jour des widgets Cockpit WASP pour un tracker spécifique
-function updateWaspCockpit(trackerName) {
-  const data = waspTrackersData[trackerName];
-  
-  const txtAlt = document.getElementById('wasp-alt');
-  const txtSpd = document.getElementById('wasp-spd');
-  const txtSats = document.getElementById('wasp-sats');
-  const txtTemp = document.getElementById('wasp-temp');
-  const txtVbat = document.getElementById('wasp-vbat');
-  const txtSignal = document.getElementById('wasp-signal');
-  
-  if (!data) {
-    if (txtAlt) txtAlt.textContent = '--';
-    if (txtSpd) txtSpd.textContent = '--';
-    if (txtSats) txtSats.textContent = '--';
-    if (txtTemp) txtTemp.textContent = '--';
-    if (txtVbat) txtVbat.textContent = '--';
-    if (txtSignal) txtSignal.textContent = '--';
-    return;
-  }
-  
-  if (txtAlt) txtAlt.textContent = data.alt.toFixed(1) + ' m';
-  if (txtSpd) txtSpd.textContent = data.spd.toFixed(1) + ' km/h';
-  if (txtSats) txtSats.textContent = (data.gpsFix ? '🟢 ' : '🔴 ') + data.numSats;
-  if (txtTemp) txtTemp.textContent = data.temp.toFixed(2) + ' °C';
-  if (txtVbat) txtVbat.textContent = data.vbat.toFixed(2) + ' V';
-  if (txtSignal) txtSignal.textContent = `${data.rssi} / ${data.snr}`;
-}
-
-// Écouteur d'état pour le mode décodeur WASP et le sélecteur de tracker
-const chkWaspDecoding = document.getElementById('chk-wasp-decoding');
-const waspSection = document.getElementById('wasp-section');
-const selectWaspTracker = document.getElementById('select-wasp-tracker');
-
-if (chkWaspDecoding) {
-  chkWaspDecoding.addEventListener('change', () => {
-    if (chkWaspDecoding.checked) {
-      if (waspSection) {
-        waspSection.classList.remove('hidden');
-        initWaspMap();
-        setTimeout(() => {
-          if (waspMap) {
-            waspMap.invalidateSize();
-            if (waspMap.lastPos) {
-              waspMap.setView(waspMap.lastPos.lat, waspMap.lastPos.lon, 13);
-            }
-          }
-        }, 150);
-        waspSection.scrollIntoView({ behavior: 'smooth' });
-      }
-    } else {
-      if (waspSection) {
-        waspSection.classList.add('hidden');
-      }
-    }
-  });
-}
-
-// Changement de l'émetteur actif via le sélecteur
-if (selectWaspTracker) {
-  selectWaspTracker.addEventListener('change', () => {
-    activeWaspTrackerName = selectWaspTracker.value;
-    updateWaspCockpit(activeWaspTrackerName);
-    
-    // Centrer immédiatement et ouvrir la popup au changement de sélection (action utilisateur)
-    const data = waspTrackersData[activeWaspTrackerName];
-    if (data && data.lat !== 0 && data.lon !== 0 && waspMap) {
-      waspMap.setView(data.lat, data.lon, waspMap.map.getZoom() < 10 ? 14 : waspMap.map.getZoom());
-      if (waspMap.markers[activeWaspTrackerName]) {
-        waspMap.markers[activeWaspTrackerName].openPopup();
-      }
-    }
-  });
-}
-
-// Recentrage manuel via le bouton cible
-const btnRecenterWasp = document.getElementById('btn-recenter-wasp');
-if (btnRecenterWasp) {
-  btnRecenterWasp.addEventListener('click', () => {
-    if (!activeWaspTrackerName) return;
-    const data = waspTrackersData[activeWaspTrackerName];
-    if (data && data.lat !== 0 && data.lon !== 0 && waspMap) {
-      waspMap.setView(data.lat, data.lon, waspMap.map.getZoom() < 10 ? 14 : waspMap.map.getZoom());
-      if (waspMap.markers[activeWaspTrackerName]) {
-        waspMap.markers[activeWaspTrackerName].openPopup();
-      }
-    }
-  });
-}
-
-// Initialisation de la langue au chargement de la page
-const savedLang = localStorage.getItem('nectar_lang');
-if (savedLang) {
-  setLanguage(savedLang);
-} else {
-  const browserLang = navigator.language || navigator.userLanguage;
-  if (browserLang && browserLang.startsWith('en')) {
-    setLanguage('en');
-  } else {
-    setLanguage('fr');
-  }
-}
