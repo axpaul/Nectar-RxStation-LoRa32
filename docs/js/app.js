@@ -703,99 +703,103 @@ class NectarApp {
     
     saveTrackersState(this.activeTrackers); // Sauvegarde LocalStorage
 
-    // 4. Décodage WASP conditionnel (29 octets LoRa)
-    if (this.dom.chkWaspDecoding?.checked && payloadSize === 29) {
-      try {
-        const waspData = decodeWaspPayload(payload);
-        const isNewWasp = !this.waspTrackersData[trackerName];
+    // 4. Décodage WASP conditionnel (29 octets LoRa et type mission WASP)
+    if (this.dom.chkWaspDecoding?.checked && ssidType === 1) {
+      if (payloadSize !== 29) {
+        this.logToTerminal(`⚠️ [WASP] APID ${apid} (${trackerName}) : Taille de trame incorrecte (${payloadSize} octets au lieu de 29)`, "sys-out");
+      } else {
+        try {
+          const waspData = decodeWaspPayload(payload);
+          const isNewWasp = !this.waspTrackersData[trackerName];
 
-        // Limitation stricte à 10 trackers WASP max
-        if (isNewWasp && Object.keys(this.waspTrackersData).length >= 10) {
-          let oldestTrackerName = "";
-          let oldestTime = Infinity;
+          // Limitation stricte à 10 trackers WASP max
+          if (isNewWasp && Object.keys(this.waspTrackersData).length >= 10) {
+            let oldestTrackerName = "";
+            let oldestTime = Infinity;
 
-          Object.keys(this.waspTrackersData).forEach(name => {
-            const lastSeen = this.activeTrackers[name] ? this.activeTrackers[name].lastSeen : 0;
-            if (lastSeen < oldestTime && name !== this.activeWaspTrackerName) {
-              oldestTime = lastSeen;
-              oldestTrackerName = name;
-            }
-          });
+            Object.keys(this.waspTrackersData).forEach(name => {
+              const lastSeen = this.activeTrackers[name] ? this.activeTrackers[name].lastSeen : 0;
+              if (lastSeen < oldestTime && name !== this.activeWaspTrackerName) {
+                oldestTime = lastSeen;
+                oldestTrackerName = name;
+              }
+            });
 
-          if (oldestTrackerName) {
-            this.map?.removeTracker(oldestTrackerName);
-            delete this.waspTrackersData[oldestTrackerName];
-            
-            if (this.dom.selectWaspTracker) {
-              const optionToRemove = Array.from(this.dom.selectWaspTracker.options).find(opt => opt.value === oldestTrackerName);
-              if (optionToRemove) {
-                this.dom.selectWaspTracker.removeChild(optionToRemove);
+            if (oldestTrackerName) {
+              this.map?.removeTracker(oldestTrackerName);
+              delete this.waspTrackersData[oldestTrackerName];
+              
+              if (this.dom.selectWaspTracker) {
+                const optionToRemove = Array.from(this.dom.selectWaspTracker.options).find(opt => opt.value === oldestTrackerName);
+                if (optionToRemove) {
+                  this.dom.selectWaspTracker.removeChild(optionToRemove);
+                }
               }
             }
           }
-        }
 
-        // Enregistrement des données WASP
-        this.waspTrackersData[trackerName] = {
-          id: ssidNum,
-          apid: apid,
-          type: ssidType,
-          utc: waspData.utc,
-          lat: waspData.lat,
-          lon: waspData.lon,
-          alt: waspData.alt,
-          spd: waspData.spd,
-          cog: waspData.cog,
-          vbat: waspData.vbat,
-          temp: waspData.temp,
-          gpsFix: waspData.gpsFix,
-          numSats: waspData.numSats,
-          rssi,
-          snr
-        };
-        
-        saveWaspTrackersData(this.waspTrackersData); // Sauvegarde LocalStorage
-
-        // Remplissage du sélecteur IHM de trackers
-        if (this.dom.selectWaspTracker) {
-          if (isNewWasp) {
-            if (Object.keys(this.waspTrackersData).length === 1) {
-              this.dom.selectWaspTracker.innerHTML = '';
-            }
-            const opt = document.createElement('option');
-            opt.value = trackerName;
-            opt.textContent = `${trackerName} (APID: ${apid})`;
-            this.dom.selectWaspTracker.appendChild(opt);
-
-            if (!this.activeWaspTrackerName) {
-              this.activeWaspTrackerName = trackerName;
-              this.dom.selectWaspTracker.value = trackerName;
-              saveActiveWaspTracker(trackerName);
-            }
-          }
-        }
-
-        // Trace sur la carte Leaflet
-        if (waspData.lat !== 0 && waspData.lon !== 0 && Math.abs(waspData.lat) <= 90 && Math.abs(waspData.lon) <= 180) {
-          this.map?.updateTrackerPosition(trackerName, {
+          // Enregistrement des données WASP
+          this.waspTrackersData[trackerName] = {
+            id: ssidNum,
+            apid: apid,
+            type: ssidType,
+            utc: waspData.utc,
             lat: waspData.lat,
             lon: waspData.lon,
             alt: waspData.alt,
             spd: waspData.spd,
             cog: waspData.cog,
+            vbat: waspData.vbat,
+            temp: waspData.temp,
             gpsFix: waspData.gpsFix,
-            utc: waspData.utc,
-            apid: apid
-          }, this.activeWaspTrackerName);
-        }
+            numSats: waspData.numSats,
+            rssi,
+            snr
+          };
+          
+          saveWaspTrackersData(this.waspTrackersData); // Sauvegarde LocalStorage
 
-        // Mise à jour du cockpit si c'est le tracker sélectionné
-        if (trackerName === this.activeWaspTrackerName) {
-          this.updateWaspCockpit(trackerName);
+          // Remplissage du sélecteur IHM de trackers
+          if (this.dom.selectWaspTracker) {
+            if (isNewWasp) {
+              if (Object.keys(this.waspTrackersData).length === 1) {
+                this.dom.selectWaspTracker.innerHTML = '';
+              }
+              const opt = document.createElement('option');
+              opt.value = trackerName;
+              opt.textContent = `${trackerName} (APID: ${apid})`;
+              this.dom.selectWaspTracker.appendChild(opt);
+
+              if (!this.activeWaspTrackerName) {
+                this.activeWaspTrackerName = trackerName;
+                this.dom.selectWaspTracker.value = trackerName;
+                saveActiveWaspTracker(trackerName);
+              }
+            }
+          }
+
+          // Trace sur la carte Leaflet
+          if (waspData.lat !== 0 && waspData.lon !== 0 && Math.abs(waspData.lat) <= 90 && Math.abs(waspData.lon) <= 180) {
+            this.map?.updateTrackerPosition(trackerName, {
+              lat: waspData.lat,
+              lon: waspData.lon,
+              alt: waspData.alt,
+              spd: waspData.spd,
+              cog: waspData.cog,
+              gpsFix: waspData.gpsFix,
+              utc: waspData.utc,
+              apid: apid
+            }, this.activeWaspTrackerName);
+          }
+
+          // Mise à jour du cockpit si c'est le tracker sélectionné
+          if (trackerName === this.activeWaspTrackerName) {
+            this.updateWaspCockpit(trackerName);
+          }
+        } catch (e) {
+          console.error("WASP payload decode error:", e);
+          this.logToTerminal(`⚠️ [WASP] APID ${apid} (${trackerName}) : Échec décodage : ${e.message}`, "sys-out");
         }
-      } catch (e) {
-        console.error("WASP payload decode error:", e);
-        this.logToTerminal(`⚠️ Erreur Décodeur WASP : ${e.message}`, "sys-out");
       }
     }
 
