@@ -95,11 +95,10 @@ classDiagram
 
 ---
 
-## ⚡ Résolution du Bug Historique de Saturation
-### Le Problème Historique
-Lorsqu'un tracker envoyait des trames LoRa à une fréquence élevée, la console web saturait l'Event Loop du navigateur à cause des rafraîchissements graphiques répétés du DOM. L'interface devenait totalement gelée (incapable de traiter les clics ou de déplacer la carte Leaflet).
+## ⚡ Résolution du Bug d'Arrêt de Flux après la Première Trame
+### Le Problème Réel Constaté
+Sur les versions récentes du micrologiciel (à partir de la v1.6.2), la liaison série USB a cessé d'envoyer le caractère de retour à la ligne `\n` (`0x0A`) en fin de trame binaire. Le décodeur JavaScript d'origine attendait un décalage de `+1` octet pour marquer la fin de la trame. Dès la réception de la deuxième trame, le buffer série subissait un décalage de 1 octet, ce qui masquait le premier octet magique `0xEB`, entraînant la perte et la désynchronisation immédiate et définitive de la liaison.
 
-### La Solution Modulaire Appliquée
-1. **Traitement direct par Interruption** : Le script ne fait plus appel à des temporisateurs (Throttling) qui accumulaient de la latence de traitement dans la queue d'événements. Chaque trame est décodée instantanément.
-2. **Parser Binaire Conforme à la v1.6.2** : Le micrologiciel récepteur ESP32 a supprimé le caractère de fin de ligne `\n` sur ses trames binaires série USB. Le parser a été mis à jour pour lire exactement `totalFrameSize` octets (sans ajouter l'offset de `+1` de l'ancienne version), éliminant ainsi toute désynchronisation et perte de flux après la première trame.
-3. **Isolation Mémoire** : La payload WASP est copiée dans un `ArrayBuffer` dédié avant d'être scannée par un `DataView`, évitant les conflits d'indexation mémoire partagée dans le moteur JavaScript V8.
+### Le Correctif Appliqué
+1. **Parser Binaire Conforme (v1.6.2)** : Le parser a été corrigé dans `serial.js` pour lire la taille exacte de la trame (`totalFrameSize`) sans attendre d'octet supplémentaire de fin de ligne. Les trames suivantes sont désormais alignées et décodées de manière continue sans aucune perte.
+2. **Isolation Mémoire WASP** : Pour éviter toute instabilité de lecture dans la structure binaire, la charge utile WASP de 29 octets est isolée dans un `ArrayBuffer` et lue par un `DataView` indépendant.
