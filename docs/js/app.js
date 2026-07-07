@@ -461,7 +461,8 @@ function parseRxBuffer() {
         const hasRssi = (gsFlag & 0x01) ? 1 : 0;
         const hasSnr = (gsFlag & 0x02) ? 1 : 0;
         const hasTimestamp = (gsFlag & 0x3C) ? 4 : 0;
-        totalFrameSize = 5 + payloadSize + hasRssi + hasSnr + hasTimestamp + 2 + 1;
+        // v1.6.2 : Alignement RF et suppression du saut de ligne série pour NectarMC (pas de +1 pour \n)
+        totalFrameSize = 5 + payloadSize + hasRssi + hasSnr + hasTimestamp + 2;
       } else { // 1.3.1 (Original sans GSFLAG)
         if (rxBuffer.length < 4) {
           processing = false;
