@@ -1176,6 +1176,9 @@ class NectarApp {
     
     const txtAlt = document.getElementById('wasp-alt');
     const txtSpd = document.getElementById('wasp-spd');
+    const txtCog = document.getElementById('wasp-cog');
+    const txtLat = document.getElementById('wasp-lat');
+    const txtLon = document.getElementById('wasp-lon');
     const txtSats = document.getElementById('wasp-sats');
     const txtTemp = document.getElementById('wasp-temp');
     const txtVbat = document.getElementById('wasp-vbat');
@@ -1184,6 +1187,9 @@ class NectarApp {
     if (!data) {
       if (txtAlt) txtAlt.textContent = '--';
       if (txtSpd) txtSpd.textContent = '--';
+      if (txtCog) txtCog.textContent = '--';
+      if (txtLat) txtLat.textContent = '--';
+      if (txtLon) txtLon.textContent = '--';
       if (txtSats) txtSats.textContent = '--';
       if (txtTemp) txtTemp.textContent = '--';
       if (txtVbat) txtVbat.textContent = '--';
@@ -1193,6 +1199,9 @@ class NectarApp {
     
     if (txtAlt) txtAlt.textContent = data.alt.toFixed(1) + ' m';
     if (txtSpd) txtSpd.textContent = data.spd.toFixed(1) + ' km/h';
+    if (txtCog) txtCog.textContent = data.cog.toFixed(1) + '°';
+    if (txtLat) txtLat.textContent = data.lat.toFixed(5);
+    if (txtLon) txtLon.textContent = data.lon.toFixed(5);
     if (txtSats) txtSats.textContent = (data.gpsFix ? '🟢 ' : '🔴 ') + data.numSats;
     if (txtTemp) txtTemp.textContent = data.temp.toFixed(2) + ' °C';
     if (txtVbat) txtVbat.textContent = data.vbat.toFixed(2) + ' V';

@@ -153,6 +153,13 @@ export function decodeWaspPayload(payload) {
   
   const gpsFix = (status & 0x80) !== 0;
   const numSats = status & 0x1F;
+  const vbat = vbatRaw / 1000.0;
+  const temp = tempRaw / 100.0;
+
+  // Controle de coherence strict (garde-fou pour trames non-WASP de 29 octets)
+  if (Math.abs(lat) > 90 || Math.abs(lon) > 180 || numSats > 32 || vbat > 15.0 || Math.abs(temp) > 100) {
+    throw new Error("Controle de coherence WASP echoue (valeurs physiques aberrantes)");
+  }
 
   return {
     utc,
@@ -161,8 +168,8 @@ export function decodeWaspPayload(payload) {
     alt,
     spd,
     cog,
-    vbat: vbatRaw / 1000.0,
-    temp: tempRaw / 100.0,
+    vbat,
+    temp,
     gpsFix,
     numSats
   };

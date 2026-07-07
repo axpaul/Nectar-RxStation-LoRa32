@@ -1044,11 +1044,12 @@ footer {
 
 .wasp-stat-val {
   font-family: var(--font-sans);
-  font-size: 1.6rem;
+  font-size: 1.3rem;
   font-weight: 800;
   color: var(--color-cyan);
   margin-bottom: 0.4rem;
   text-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
+  white-space: nowrap;
 }
 
 .wasp-stat-lbl {
@@ -1109,7 +1110,7 @@ footer {
     grid-template-columns: repeat(2, 1fr);
   }
   .wasp-stat-val {
-    font-size: 1.3rem;
+    font-size: 1.1rem;
   }
 }
 
