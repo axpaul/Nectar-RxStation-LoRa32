@@ -15,6 +15,7 @@ export class NectarSerial extends EventTarget {
     this.isConnected = false;
     this.rxBuffer = [];
     this.readLoopPromise = null;
+    this.writePromise = Promise.resolve();
   }
 
   /**
@@ -226,19 +227,30 @@ export class NectarSerial extends EventTarget {
   async sendSerialText(text) {
     if (!this.port || !this.port.writable) return;
     
-    try {
-      const encoder = new TextEncoder();
-      const data = encoder.encode(text + '\n');
-      
-      const writer = this.port.writable.getWriter();
-      await writer.write(data);
-      writer.releaseLock();
-      
-      this.dispatchEvent(new CustomEvent('line', { detail: text })); // Écho local dans la console
-    } catch (err) {
-      this.log(`Erreur d'envoi : ${err.message}`, 'sys-out');
-      console.error("Erreur sendSerialText:", err);
-    }
+    // Chainage sequentiel des ecritures pour eviter le lock concurrent
+    this.writePromise = this.writePromise.then(async () => {
+      let writer = null;
+      try {
+        const encoder = new TextEncoder();
+        const data = encoder.encode(text + '\n');
+        
+        writer = this.port.writable.getWriter();
+        await writer.write(data);
+        
+        this.dispatchEvent(new CustomEvent('line', { detail: text })); // Echo local dans la console
+      } catch (err) {
+        this.log(`Erreur d'envoi : ${err.message}`, 'sys-out');
+        console.error("Erreur sendSerialText:", err);
+      } finally {
+        if (writer) {
+          try {
+            writer.releaseLock();
+          } catch (e) {}
+        }
+      }
+    });
+
+    return this.writePromise;
   }
 
   /**
