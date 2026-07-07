@@ -82,10 +82,10 @@
           </select>
         </div>
         <div class="form-group">
-          <label for="select-fw-version" data-i18n="conn_fw_version">Version Décodeur / Trame :</label>
+          <label for="select-fw-version" data-i18n="conn_fw_version">Format trame :</label>
           <select id="select-fw-version">
-            <option value="gs_flag" selected>v1.6.2 (Avec GSFLAG - Metadata dynamiques)</option>
-            <option value="1.3.1">v1.3.1 (Sans GSFLAG - Sans Metadata)</option>
+            <option value="gs_flag" selected data-i18n="conn_fw_with_gs">Avec GS Flag (v1.6.2)</option>
+            <option value="1.3.1" data-i18n="conn_fw_without_gs">Sans GS Flag (v1.3.1)</option>
           </select>
         </div>
         <div class="button-group-row">
@@ -95,7 +95,7 @@
         <div class="port-info text-secondary">
           <span data-i18n="conn_status_label">Statut :</span> <span id="lbl-port-name" data-i18n="conn_no_device">Aucun appareil connecté</span>
         </div>
-        <div class="checkbox-group" style="margin-top: 1rem; display: flex; flex-direction: column; gap: 0.5rem;">
+        <div class="checkbox-group">
           <label class="checkbox-container">
             <input type="checkbox" id="chk-voice-alerts" checked>
             <span data-i18n="conn_voice_alerts">🎙️ Synthèse Vocale (Alertes Tracker)</span>
@@ -183,11 +183,12 @@
             <span class="stat-lbl" data-i18n="stats_snr">SNR (dB)</span>
           </div>
           <div class="stat-box">
-            <span class="stat-val" id="stat-count-container">
-              <span id="stat-count">0</span>
-              <span style="font-size: 0.9rem; color: var(--color-danger); font-weight: 600; margin-left: 2px;">/ <span id="stat-crc-errors">0</span> KO</span>
-            </span>
-            <span class="stat-lbl" data-i18n="stats_count">Trames (Reçues / KO)</span>
+            <span class="stat-val" id="stat-count">0</span>
+            <span class="stat-lbl" data-i18n="stats_count_recv">Trames Reçues</span>
+          </div>
+          <div class="stat-box">
+            <span class="stat-val text-danger" id="stat-crc-errors">0</span>
+            <span class="stat-lbl" data-i18n="stats_crc_errors">Erreurs CRC</span>
           </div>
         </div>
         

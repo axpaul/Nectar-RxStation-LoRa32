@@ -180,6 +180,9 @@ export class NectarSerial extends EventTarget {
         } catch (decErr) {
           console.error("Erreur de décodage:", decErr);
           this.log(`[ERREUR DECODAGE] Trame rejetée : ${decErr.message}`, 'sys-out');
+          if (decErr.message && decErr.message.includes("CRC check failed")) {
+            this.dispatchEvent(new CustomEvent('crc-error'));
+          }
         }
       } 
       // 2. Détection de lignes textuelles brutes

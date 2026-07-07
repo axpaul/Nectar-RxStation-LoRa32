@@ -84,6 +84,7 @@ class NectarApp {
     // Abonnement aux événements du port série
     this.serial.addEventListener('packet', (e) => this.onPacketReceived(e.detail));
     this.serial.addEventListener('line', (e) => this.onLineReceived(e.detail));
+    this.serial.addEventListener('crc-error', () => this.onCrcErrorReceived());
     this.serial.addEventListener('log', (e) => this.logToTerminal(e.detail.message, e.detail.type));
     this.serial.addEventListener('bytes-read', (e) => { this.bytesCountThisSecond += e.detail; });
     this.serial.addEventListener('connection-changed', (e) => this.updateConnectionUI(e.detail.connected, e.detail.name));
@@ -270,8 +271,7 @@ class NectarApp {
       this.crcErrorsCount = 0;
       this.rssiHistory = [];
       this.snrHistory = [];
-      
-      if (this.dom.statCount) this.dom.statCount.textContent = '0 / 0';
+      if (this.dom.statCount) this.dom.statCount.textContent = '0';
       if (this.dom.statCrcErrors) this.dom.statCrcErrors.textContent = '0';
       if (this.dom.statRssi) this.dom.statRssi.textContent = '--';
       if (this.dom.statSnr) this.dom.statSnr.textContent = '--';
@@ -412,7 +412,10 @@ class NectarApp {
         if (this.dom.statRssi) this.dom.statRssi.textContent = `${lastFrame.rssi} dBm`;
         if (this.dom.statSnr) this.dom.statSnr.textContent = `${lastFrame.snr} dB`;
         if (this.dom.statCount) {
-          this.dom.statCount.textContent = `${this.packetIndex} / ${this.crcErrorsCount}`;
+          this.dom.statCount.textContent = this.packetIndex;
+        }
+        if (this.dom.statCrcErrors) {
+          this.dom.statCrcErrors.textContent = this.crcErrorsCount;
         }
         
         // Dessiner les graphiques
@@ -582,13 +585,15 @@ class NectarApp {
       this.throughputHistory.shift();
     }
     
-    const kbps = (this.bytesCountThisSecond * 8) / 1000.0;
     if (this.dom.lblThroughput) {
       const currentLang = localStorage.getItem('nectar_lang') || 'fr';
-      if (currentLang === 'fr') {
-        this.dom.lblThroughput.textContent = `${this.bytesCountThisSecond} octets/s (${kbps.toFixed(2)} kbps)`;
+      const bytes = this.bytesCountThisSecond;
+      if (bytes < 1000) {
+        const unit = currentLang === 'fr' ? 'o/s' : 'B/s';
+        this.dom.lblThroughput.textContent = `${bytes} ${unit}`;
       } else {
-        this.dom.lblThroughput.textContent = `${this.bytesCountThisSecond} bytes/s (${kbps.toFixed(2)} kbps)`;
+        const kbps = (bytes * 8) / 1000.0;
+        this.dom.lblThroughput.textContent = `${kbps.toFixed(1)} kbps`;
       }
     }
     
@@ -654,7 +659,7 @@ class NectarApp {
     if (this.dom.statRssi) this.dom.statRssi.textContent = `${rssi} dBm`;
     if (this.dom.statSnr) this.dom.statSnr.textContent = `${snr} dB`;
     if (this.dom.statCount) {
-      this.dom.statCount.textContent = `${this.packetIndex} / ${this.crcErrorsCount}`;
+      this.dom.statCount.textContent = this.packetIndex;
     }
 
     this.rssiHistory.push({ value: rssi, time: timestamp });
@@ -795,6 +800,16 @@ class NectarApp {
     }
 
     this.updateTrackersTable();
+  }
+
+  /**
+   * Traite la notification d'erreur CRC de la liaison serie.
+   */
+  onCrcErrorReceived() {
+    this.crcErrorsCount++;
+    if (this.dom.statCrcErrors) {
+      this.dom.statCrcErrors.textContent = this.crcErrorsCount;
+    }
   }
 
   /**
@@ -1219,14 +1234,28 @@ class NectarApp {
     this.drawSingleChart('rssi-chart-line', 'rssi-chart-fill', this.rssiHistory, -120, 0);
     this.drawSingleChart('snr-chart-line', 'snr-chart-fill', this.snrHistory, -20, 20);
     
-    // Mettre à jour les indicateurs de temps
+    // Mettre a jour les indicateurs de temps (avec fleche de debut a fin)
     const lblRssiTime = document.getElementById('chart-rssi-time');
     const lblSnrTime = document.getElementById('chart-snr-time');
-    if (this.rssiHistory.length > 0 && lblRssiTime) {
-      lblRssiTime.textContent = this.rssiHistory[this.rssiHistory.length - 1].time;
+    
+    if (lblRssiTime) {
+      if (this.rssiHistory.length > 0) {
+        lblRssiTime.textContent = this.rssiHistory.length === 1
+          ? this.rssiHistory[0].time
+          : `${this.rssiHistory[0].time} ➔ ${this.rssiHistory[this.rssiHistory.length - 1].time}`;
+      } else {
+        lblRssiTime.textContent = '--:--:--';
+      }
     }
-    if (this.snrHistory.length > 0 && lblSnrTime) {
-      lblSnrTime.textContent = this.snrHistory[this.snrHistory.length - 1].time;
+    
+    if (lblSnrTime) {
+      if (this.snrHistory.length > 0) {
+        lblSnrTime.textContent = this.snrHistory.length === 1
+          ? this.snrHistory[0].time
+          : `${this.snrHistory[0].time} ➔ ${this.snrHistory[this.snrHistory.length - 1].time}`;
+      } else {
+        lblSnrTime.textContent = '--:--:--';
+      }
     }
   }
 
