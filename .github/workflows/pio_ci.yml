@@ -1,4 +1,4 @@
-name: PlatformIO CI
+name: PlatformIO CI & Security Analysis
 
 on:
   push:
@@ -9,28 +9,46 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      security-events: write # Requis pour que CodeQL puisse publier les alertes de sécurité
 
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
+    # 1. Configuration de l'environnement Python
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
         python-version: '3.10'
 
+    # 2. Cache pour accélérer les builds futurs
     - name: Cache PlatformIO
       uses: actions/cache@v4
       with:
         path: ~/.platformio
         key: ${{ runner.os }}-platformio
 
+    # 3. Installation de la CLI PlatformIO
     - name: Install PlatformIO
       run: |
         python -m pip install --upgrade pip
         pip install platformio
 
+    # 4. INITIALISATION DE CODEQL (Spécifier le langage C++)
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: 'cpp' # Indique à CodeQL qu'il doit surveiller les compilateurs C/C++
+
+    # 5. COMPILATION (CodeQL va intercepter ce build pour analyser le code)
     - name: Run PlatformIO Build
       run: |
         pio run -e ttgo-lora32-v21-868
         pio run -e ttgo-lora32-v21-433
+
+    # 6. EXÉCUTION DE L'ANALYSE SÉMANTIQUE
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:cpp"
