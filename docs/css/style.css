@@ -1118,3 +1118,36 @@ footer {
 .wasp-pulse {
   animation: wasp-marker-pulse-anim 0.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
 }
+
+/* Classes pour eviter les styles inline dans le JS */
+.sd-file-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.sd-file-cell {
+  padding: 0.5rem;
+}
+.tracker-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+.tracker-cell {
+  padding: 0.75rem;
+}
+.tracker-cell-signal {
+  font-family: var(--font-mono);
+  font-weight: bold;
+  color: var(--color-cyan);
+  white-space: nowrap;
+}
+
+#wasp-map {
+  height: 350px;
+  width: 100%;
+  border-radius: 8px;
+  border: 1px solid var(--bg-card-border);
+}
+
+@media (max-width: 600px) {
+  #wasp-map {
+    height: 250px;
+  }
+}

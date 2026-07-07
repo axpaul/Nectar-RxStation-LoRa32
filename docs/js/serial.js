@@ -1,25 +1,20 @@
 /**
  * @file serial.js
  * @brief Gestion de l'acquisition Web Serial et du flashage d'ESP32 pour RocketStation.
+ * Découplage événementiel basé sur la classe native EventTarget.
  */
 
 import { ESPLoader, Transport } from 'https://cdn.jsdelivr.net/npm/esptool-js@0.6.0/+esm';
 import { decodeNectarFrame } from './decoder.js';
 
-export class NectarSerial {
-  constructor(callbacks = {}) {
+export class NectarSerial extends EventTarget {
+  constructor() {
+    super();
     this.port = null;
     this.reader = null;
     this.isConnected = false;
     this.rxBuffer = [];
     this.readLoopPromise = null;
-    
-    // Callbacks d'interaction avec le contrôleur d'IHM
-    this.onPacket = callbacks.onPacket || null;
-    this.onLine = callbacks.onLine || null;
-    this.onLog = callbacks.onLog || null;
-    this.onBytesRead = callbacks.onBytesRead || null;
-    this.onConnectionChanged = callbacks.onConnectionChanged || null;
   }
 
   /**
@@ -42,9 +37,9 @@ export class NectarSerial {
       const portInfo = this.port.getInfo();
       const friendlyName = this.getFriendlyPortName(portInfo);
       
-      if (this.onConnectionChanged) {
-        this.onConnectionChanged(true, friendlyName);
-      }
+      this.dispatchEvent(new CustomEvent('connection-changed', { 
+        detail: { connected: true, name: friendlyName } 
+      }));
       
       this.log("Connexion établie avec succès.", 'sys-out');
 
@@ -52,7 +47,7 @@ export class NectarSerial {
       this.readLoopPromise = this.readSerialLoop(fwVersionFormat);
     } catch (err) {
       this.log(`Erreur de connexion : ${err.message}`, 'sys-out');
-      this.disconnect();
+      await this.disconnect();
       throw err;
     }
   }
@@ -86,9 +81,9 @@ export class NectarSerial {
       this.port = null;
     }
 
-    if (this.onConnectionChanged) {
-      this.onConnectionChanged(false, '');
-    }
+    this.dispatchEvent(new CustomEvent('connection-changed', { 
+      detail: { connected: false, name: '' } 
+    }));
     
     this.log("Liaison série déconnectée.", 'sys-out');
   }
@@ -108,9 +103,7 @@ export class NectarSerial {
               break;
             }
             if (value && value.length > 0) {
-              if (this.onBytesRead) {
-                this.onBytesRead(value.length);
-              }
+              this.dispatchEvent(new CustomEvent('bytes-read', { detail: value.length }));
               
               // Accumulation
               for (let i = 0; i < value.length; i++) {
@@ -182,9 +175,7 @@ export class NectarSerial {
 
         try {
           const decoded = decodeNectarFrame(frameBytes, fwVersionFormat);
-          if (this.onPacket) {
-            this.onPacket(decoded);
-          }
+          this.dispatchEvent(new CustomEvent('packet', { detail: decoded }));
         } catch (decErr) {
           console.error("Erreur de décodage:", decErr);
           this.log(`[ERREUR DECODAGE] Trame rejetée : ${decErr.message}`, 'sys-out');
@@ -215,9 +206,7 @@ export class NectarSerial {
           const lineText = decoder.decode(new Uint8Array(lineBytes)).trim();
           
           if (lineText.length > 0) {
-            if (this.onLine) {
-              this.onLine(lineText);
-            }
+            this.dispatchEvent(new CustomEvent('line', { detail: lineText }));
           }
         } else {
           // Vider le buffer si le texte accumulé est anormalement long pour éviter les fuites mémoire
@@ -245,9 +234,7 @@ export class NectarSerial {
       await writer.write(data);
       writer.releaseLock();
       
-      if (this.onLine) {
-        this.onLine(text); // Écho local dans la console
-      }
+      this.dispatchEvent(new CustomEvent('line', { detail: text })); // Écho local dans la console
     } catch (err) {
       this.log(`Erreur d'envoi : ${err.message}`, 'sys-out');
       console.error("Erreur sendSerialText:", err);
@@ -345,9 +332,9 @@ export class NectarSerial {
    * @private
    */
   log(message, type = 'cmd-out') {
-    if (this.onLog) {
-      this.onLog(message, type);
-    }
+    this.dispatchEvent(new CustomEvent('log', { 
+      detail: { message, type } 
+    }));
   }
 
   /**

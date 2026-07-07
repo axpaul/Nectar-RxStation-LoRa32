@@ -1,13 +1,25 @@
 /**
  * @file app.js
  * @brief Point d'entrée principal et orchestrateur de l'interface (NectarApp).
- * Version modulaire et orientée objet ES6.
+ * Version modulaire, optimisée et persistante (IndexedDB & LocalStorage).
  */
 
 import { NectarSerial } from './serial.js';
 import { NectarMap } from './map.js';
 import { getTranslation, updateLanguage } from './translate.js';
 import { decodeWaspPayload } from './decoder.js';
+import { 
+  saveFrame, 
+  loadFrames, 
+  clearFrames, 
+  saveTrackersState, 
+  loadTrackersState, 
+  saveWaspTrackersData, 
+  loadWaspTrackersData, 
+  saveActiveWaspTracker, 
+  loadActiveWaspTracker,
+  clearAllStorage
+} from './storage.js';
 
 // Convertit un tableau d'octets en chaîne hexadécimale continue
 function bytesToHex(bytes) {
@@ -24,7 +36,7 @@ class NectarApp {
     // États de l'application
     this.packetIndex = 0;
     this.crcErrorsCount = 0;
-    this.activeTrackers = {};     // { trackerName: { name, typeLabelKey, lastApid, packetCount, lastSeen, lastPayloadHex, lastRssi, lastSnr, isLost, voiceLostSpoken } }
+    this.activeTrackers = {};     // { trackerName: { name, typeLabelKey, lastApid, packetCount, lastSeen, lastPayloadHex, lastRssi, lastSnr, isLost } }
     this.allReceivedFrames = [];  // Capé à 5000 trames
     this.waspTrackersData = {};   // { trackerName: { alt, spd, ... } }
     this.activeWaspTrackerName = "";
@@ -66,14 +78,15 @@ class NectarApp {
     // Instanciation de la carte
     this.map = new NectarMap('wasp-map');
     
-    // Instanciation du module Web Serial
-    this.serial = new NectarSerial({
-      onPacket: (decoded) => this.onPacketReceived(decoded),
-      onLine: (lineText) => this.onLineReceived(lineText),
-      onLog: (msg, type) => this.logToTerminal(msg, type),
-      onBytesRead: (count) => { this.bytesCountThisSecond += count; },
-      onConnectionChanged: (connected, name) => this.updateConnectionUI(connected, name)
-    });
+    // Instanciation du module Web Serial (héritier de EventTarget)
+    this.serial = new NectarSerial();
+    
+    // Abonnement aux événements du port série
+    this.serial.addEventListener('packet', (e) => this.onPacketReceived(e.detail));
+    this.serial.addEventListener('line', (e) => this.onLineReceived(e.detail));
+    this.serial.addEventListener('log', (e) => this.logToTerminal(e.detail.message, e.detail.type));
+    this.serial.addEventListener('bytes-read', (e) => { this.bytesCountThisSecond += e.detail; });
+    this.serial.addEventListener('connection-changed', (e) => this.updateConnectionUI(e.detail.connected, e.detail.name));
 
     this.bindEvents();
     
@@ -87,6 +100,9 @@ class NectarApp {
 
     // Écoute de l'événement personnalisé de changement de langue
     window.addEventListener('lang-changed', (e) => this.onLanguageChanged(e.detail));
+
+    // Restauration asynchrone de la session précédente
+    this.restorePersistedSession();
   }
 
   /**
@@ -156,31 +172,27 @@ class NectarApp {
    */
   bindEvents() {
     // Connexion Série
-    if (this.dom.btnConnect) {
-      this.dom.btnConnect.addEventListener('click', () => {
-        const baud = this.dom.selectBaudrate ? parseInt(this.dom.selectBaudrate.value, 10) : 115200;
-        const fmt = this.dom.selectFwVersion ? this.dom.selectFwVersion.value : 'gs_flag';
-        this.serial.connect(baud, fmt).then(() => {
-          // Demande de configuration initiale après démarrage de la carte (6 secondes de temporisation)
-          setTimeout(() => {
-            const currentEpoch = Math.floor(Date.now() / 1000);
-            this.serial.sendSerialText(`AT+TIME=${currentEpoch}`);
-            this.serial.sendSerialText('AT+FREQ?');
-            this.serial.sendSerialText('AT+SF?');
-            this.serial.sendSerialText('AT+BW?');
-            this.serial.sendSerialText('AT+CRC?');
-          }, 6000);
-        }).catch(err => {
-          if (err.message === "unsupported") {
-            alert(getTranslation('alert_browser_unsupported'));
-          }
-        });
+    this.dom.btnConnect?.addEventListener('click', () => {
+      const baud = this.dom.selectBaudrate ? parseInt(this.dom.selectBaudrate.value, 10) : 115200;
+      const fmt = this.dom.selectFwVersion ? this.dom.selectFwVersion.value : 'gs_flag';
+      this.serial.connect(baud, fmt).then(() => {
+        // Demande de configuration initiale après démarrage de la carte (6 secondes de temporisation)
+        setTimeout(() => {
+          const currentEpoch = Math.floor(Date.now() / 1000);
+          this.serial.sendSerialText(`AT+TIME=${currentEpoch}`);
+          this.serial.sendSerialText('AT+FREQ?');
+          this.serial.sendSerialText('AT+SF?');
+          this.serial.sendSerialText('AT+BW?');
+          this.serial.sendSerialText('AT+CRC?');
+        }, 6000);
+      }).catch(err => {
+        if (err.message === "unsupported") {
+          alert(getTranslation('alert_browser_unsupported'));
+        }
       });
-    }
+    });
     
-    if (this.dom.btnDisconnect) {
-      this.dom.btnDisconnect.addEventListener('click', () => this.serial.disconnect());
-    }
+    this.dom.btnDisconnect?.addEventListener('click', () => this.serial.disconnect());
 
     // Détection déconnexion matérielle USB
     navigator.serial?.addEventListener('disconnect', (event) => {
@@ -191,213 +203,290 @@ class NectarApp {
     });
 
     // Lecture / Écriture de Configuration Radio
-    if (this.dom.btnReadCfg) {
-      this.dom.btnReadCfg.addEventListener('click', () => {
-        this.serial.sendSerialText('AT+FREQ?');
-        this.serial.sendSerialText('AT+SF?');
-        this.serial.sendSerialText('AT+BW?');
-        this.serial.sendSerialText('AT+CRC?');
-      });
-    }
+    this.dom.btnReadCfg?.addEventListener('click', () => {
+      this.serial.sendSerialText('AT+FREQ?');
+      this.serial.sendSerialText('AT+SF?');
+      this.serial.sendSerialText('AT+BW?');
+      this.serial.sendSerialText('AT+CRC?');
+    });
     
-    if (this.dom.btnWriteCfg) {
-      this.dom.btnWriteCfg.addEventListener('click', () => {
-        if (this.dom.inputFreq) {
-          const freq = parseFloat(this.dom.inputFreq.value);
-          if (!isNaN(freq)) this.serial.sendSerialText(`AT+FREQ=${freq.toFixed(3)}`);
-        }
-        if (this.dom.selectSf) {
-          this.serial.sendSerialText(`AT+SF=${this.dom.selectSf.value}`);
-        }
-        if (this.dom.selectBw) {
-          this.serial.sendSerialText(`AT+BW=${this.dom.selectBw.value}`);
-        }
-        if (this.dom.selectCrc) {
-          this.serial.sendSerialText(`AT+CRC=${this.dom.selectCrc.value}`);
-        }
-      });
-    }
+    this.dom.btnWriteCfg?.addEventListener('click', () => {
+      if (this.dom.inputFreq) {
+        const freq = parseFloat(this.dom.inputFreq.value);
+        if (!isNaN(freq)) this.serial.sendSerialText(`AT+FREQ=${freq.toFixed(3)}`);
+      }
+      if (this.dom.selectSf) {
+        this.serial.sendSerialText(`AT+SF=${this.dom.selectSf.value}`);
+      }
+      if (this.dom.selectBw) {
+        this.serial.sendSerialText(`AT+BW=${this.dom.selectBw.value}`);
+      }
+      if (this.dom.selectCrc) {
+        this.serial.sendSerialText(`AT+CRC=${this.dom.selectCrc.value}`);
+      }
+    });
     
-    if (this.dom.btnSaveCfg) {
-      this.dom.btnSaveCfg.addEventListener('click', () => this.serial.sendSerialText('AT+SAVE'));
-    }
+    this.dom.btnSaveCfg?.addEventListener('click', () => this.serial.sendSerialText('AT+SAVE'));
     
-    if (this.dom.btnResetCfg) {
-      this.dom.btnResetCfg.addEventListener('click', () => {
-        if (confirm(getTranslation('confirm_factory_reset'))) {
-          this.serial.sendSerialText('AT+RESET');
-        }
-      });
-    }
+    this.dom.btnResetCfg?.addEventListener('click', () => {
+      if (confirm(getTranslation('confirm_factory_reset'))) {
+        this.serial.sendSerialText('AT+RESET');
+      }
+    });
 
     // Terminal
-    if (this.dom.terminalForm) {
-      this.dom.terminalForm.addEventListener('submit', (e) => {
-        e.preventDefault();
-        if (this.dom.terminalInput) {
-          const cmd = this.dom.terminalInput.value.trim();
-          if (cmd.length > 0) {
-            this.serial.sendSerialText(cmd);
-            this.dom.terminalInput.value = '';
-          }
+    this.dom.terminalForm?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      if (this.dom.terminalInput) {
+        const cmd = this.dom.terminalInput.value.trim();
+        if (cmd.length > 0) {
+          this.serial.sendSerialText(cmd);
+          this.dom.terminalInput.value = '';
         }
-      });
-    }
+      }
+    });
     
-    if (this.dom.btnClearTerminal) {
-      this.dom.btnClearTerminal.addEventListener('click', () => {
-        if (this.dom.terminalLogs) this.dom.terminalLogs.innerHTML = '';
-      });
-    }
+    this.dom.btnClearTerminal?.addEventListener('click', () => {
+      if (this.dom.terminalLogs) this.dom.terminalLogs.innerHTML = '';
+    });
 
     // Téléchargement Logs SD
-    if (this.dom.btnListSd) {
-      this.dom.btnListSd.addEventListener('click', () => {
-        const tableBody = document.querySelector('#table-sd-files tbody');
-        if (tableBody) {
-          tableBody.innerHTML = '';
-          const rowEmpty = document.createElement('tr');
-          rowEmpty.id = 'row-empty-sd-files';
-          rowEmpty.innerHTML = `<td colspan="3" class="text-center text-secondary" style="padding: 1rem 0; text-align: center;">${getTranslation('sd_files_empty')}</td>`;
-          tableBody.appendChild(rowEmpty);
-        }
-        this.serial.sendSerialText('AT+LIST');
-      });
-    }
+    this.dom.btnListSd?.addEventListener('click', () => {
+      const tableBody = document.querySelector('#table-sd-files tbody');
+      if (tableBody) {
+        tableBody.innerHTML = '';
+        const rowEmpty = document.createElement('tr');
+        rowEmpty.id = 'row-empty-sd-files';
+        rowEmpty.innerHTML = `<td colspan="3" class="text-center text-secondary" style="padding: 1rem 0; text-align: center;">${getTranslation('sd_files_empty')}</td>`;
+        tableBody.appendChild(rowEmpty);
+      }
+      this.serial.sendSerialText('AT+LIST');
+    });
 
     // Nettoyage Télémétrie et Trackers
-    if (this.dom.btnClearTelemetry) {
-      this.dom.btnClearTelemetry.addEventListener('click', () => {
-        this.allReceivedFrames = [];
-        this.packetIndex = 0;
-        this.crcErrorsCount = 0;
-        this.rssiHistory = [];
-        this.snrHistory = [];
-        
-        if (this.dom.statCount) this.dom.statCount.textContent = '0 / 0';
-        if (this.dom.statCrcErrors) this.dom.statCrcErrors.textContent = '0';
-        if (this.dom.statRssi) this.dom.statRssi.textContent = '--';
-        if (this.dom.statSnr) this.dom.statSnr.textContent = '--';
-        
-        this.renderTelemetryTable();
-        this.drawSignalCharts();
-      });
-    }
+    this.dom.btnClearTelemetry?.addEventListener('click', () => {
+      this.allReceivedFrames = [];
+      this.packetIndex = 0;
+      this.crcErrorsCount = 0;
+      this.rssiHistory = [];
+      this.snrHistory = [];
+      
+      if (this.dom.statCount) this.dom.statCount.textContent = '0 / 0';
+      if (this.dom.statCrcErrors) this.dom.statCrcErrors.textContent = '0';
+      if (this.dom.statRssi) this.dom.statRssi.textContent = '--';
+      if (this.dom.statSnr) this.dom.statSnr.textContent = '--';
+      
+      this.renderTelemetryTable();
+      this.drawSignalCharts();
+      clearFrames();
+    });
     
-    if (this.dom.btnExportTelemetry) {
-      this.dom.btnExportTelemetry.addEventListener('click', () => this.exportTelemetryToCSV());
-    }
+    this.dom.btnExportTelemetry?.addEventListener('click', () => this.exportTelemetryToCSV());
     
-    if (this.dom.btnClearTrackers) {
-      this.dom.btnClearTrackers.addEventListener('click', () => {
-        this.activeTrackers = {};
-        this.waspTrackersData = {};
-        this.activeWaspTrackerName = "";
-        
-        this.updateTrackersTable();
-        
-        if (this.map) {
-          this.map.clear();
-        }
-        
-        this.updateWaspCockpit(null);
-        if (this.dom.selectWaspTracker) {
-          this.dom.selectWaspTracker.innerHTML = '<option value="" disabled selected>Attente émetteur...</option>';
-        }
-      });
-    }
+    this.dom.btnClearTrackers?.addEventListener('click', () => {
+      this.activeTrackers = {};
+      this.waspTrackersData = {};
+      this.activeWaspTrackerName = "";
+      
+      this.updateTrackersTable();
+      
+      this.map?.clear();
+      
+      this.updateWaspCockpit(null);
+      if (this.dom.selectWaspTracker) {
+        this.dom.selectWaspTracker.innerHTML = '<option value="" disabled selected>Attente émetteur...</option>';
+      }
+      clearAllStorage();
+    });
 
     // Options Décodeur WASP
-    if (this.dom.chkWaspDecoding) {
-      this.dom.chkWaspDecoding.addEventListener('change', () => {
-        if (this.dom.chkWaspDecoding.checked) {
-          if (this.dom.waspSection) {
-            this.dom.waspSection.classList.remove('hidden');
-            this.map.init();
-            setTimeout(() => {
-              this.map.invalidateSize();
-              if (this.map.lastPos) {
-                this.map.setView(this.map.lastPos.lat, this.map.lastPos.lon, 13);
-              }
-            }, 150);
-            this.dom.waspSection.scrollIntoView({ behavior: 'smooth' });
-          }
-        } else {
-          if (this.dom.waspSection) {
-            this.dom.waspSection.classList.add('hidden');
-          }
-        }
-      });
-    }
+    this.dom.chkWaspDecoding?.addEventListener('change', () => {
+      if (this.dom.chkWaspDecoding?.checked) {
+        if (this.dom.waspSection) {
+          this.dom.waspSection.classList.remove('hidden');
+          this.map?.init();
+          
+          // Re-dessiner les trackers WASP rechargés sur la carte
+          Object.keys(this.waspTrackersData).forEach(name => {
+            const data = this.waspTrackersData[name];
+            if (data.lat !== 0 && data.lon !== 0) {
+              this.map.updateTrackerPosition(name, data, this.activeWaspTrackerName);
+            }
+          });
 
-    if (this.dom.selectWaspTracker) {
-      this.dom.selectWaspTracker.addEventListener('change', () => {
-        this.activeWaspTrackerName = this.dom.selectWaspTracker.value;
-        this.updateWaspCockpit(this.activeWaspTrackerName);
-        
-        const data = this.waspTrackersData[this.activeWaspTrackerName];
-        if (data && data.lat !== 0 && data.lon !== 0) {
-          this.map.setView(data.lat, data.lon, this.map.map.getZoom() < 10 ? 14 : this.map.map.getZoom());
-          if (this.map.markers[this.activeWaspTrackerName]) {
-            this.map.markers[this.activeWaspTrackerName].openPopup();
-          }
+          setTimeout(() => {
+            this.map?.invalidateSize();
+            if (this.map?.lastPos) {
+              this.map.setView(this.map.lastPos.lat, this.map.lastPos.lon, 13);
+            }
+          }, 150);
+          this.dom.waspSection.scrollIntoView({ behavior: 'smooth' });
         }
-      });
-    }
+      } else {
+        if (this.dom.waspSection) {
+          this.dom.waspSection.classList.add('hidden');
+        }
+      }
+    });
 
-    if (this.dom.btnRecenterWasp) {
-      this.dom.btnRecenterWasp.addEventListener('click', () => {
-        if (!this.activeWaspTrackerName) return;
-        const data = this.waspTrackersData[this.activeWaspTrackerName];
-        if (data && data.lat !== 0 && data.lon !== 0) {
-          this.map.setView(data.lat, data.lon, this.map.map.getZoom() < 10 ? 14 : this.map.map.getZoom());
-          if (this.map.markers[this.activeWaspTrackerName]) {
-            this.map.markers[this.activeWaspTrackerName].openPopup();
-          }
-        }
-      });
-    }
+    this.dom.selectWaspTracker?.addEventListener('change', () => {
+      this.activeWaspTrackerName = this.dom.selectWaspTracker?.value || "";
+      saveActiveWaspTracker(this.activeWaspTrackerName);
+      this.updateWaspCockpit(this.activeWaspTrackerName);
+      
+      const data = this.waspTrackersData[this.activeWaspTrackerName];
+      if (data && data.lat !== 0 && data.lon !== 0) {
+        this.map?.setView(data.lat, data.lon, this.map.map.getZoom() < 10 ? 14 : this.map.map.getZoom());
+        this.map?.markers[this.activeWaspTrackerName]?.openPopup();
+      }
+    });
+
+    this.dom.btnRecenterWasp?.addEventListener('click', () => {
+      if (!this.activeWaspTrackerName) return;
+      const data = this.waspTrackersData[this.activeWaspTrackerName];
+      if (data && data.lat !== 0 && data.lon !== 0) {
+        this.map?.setView(data.lat, data.lon, this.map.map.getZoom() < 10 ? 14 : this.map.map.getZoom());
+        this.map?.markers[this.activeWaspTrackerName]?.openPopup();
+      }
+    });
 
     // Outil de Flashage de Firmware
-    if (this.dom.btnFlash) {
-      this.dom.btnFlash.addEventListener('click', () => {
-        if (this.serial.isConnected) {
-          alert(getTranslation('alert_monitor_active_disconnect'));
-          return;
+    this.dom.btnFlash?.addEventListener('click', () => {
+      if (this.serial.isConnected) {
+        alert(getTranslation('alert_monitor_active_disconnect'));
+        return;
+      }
+      
+      const band = this.dom.selectBand ? this.dom.selectBand.value : '868';
+      const fwVersion = this.dom.selectFlashFwVersion ? this.dom.selectFlashFwVersion.value : 'latest';
+      const verTag = fwVersion === 'latest' ? 'v1.6.2' : fwVersion;
+      const binUrl = `binaries/firmware_bluetooth_${band}_${verTag}.bin`;
+      
+      this.setFlasherControlsDisabled(true);
+      if (this.dom.flashProgressContainer) this.dom.flashProgressContainer.classList.remove('hidden');
+      if (this.dom.lblFlashStatus) this.dom.lblFlashStatus.textContent = getTranslation('flash_status_connecting');
+      if (this.dom.lblFlashPercent) this.dom.lblFlashPercent.textContent = "0%";
+      if (this.dom.flashProgressBar) this.dom.flashProgressBar.style.width = "0%";
+      
+      this.serial.flashFirmware(
+        binUrl,
+        (percent, statusKey, extra) => {
+          if (this.dom.lblFlashPercent) this.dom.lblFlashPercent.textContent = `${percent}%`;
+          if (this.dom.flashProgressBar) this.dom.flashProgressBar.style.width = `${percent}%`;
+          if (this.dom.lblFlashStatus) {
+            this.dom.lblFlashStatus.textContent = extra ? getTranslation(statusKey, { chip: extra }) : getTranslation(statusKey);
+          }
+        },
+        (logMsg) => this.logToTerminal(logMsg, 'sys-out')
+      ).catch(err => {
+        if (this.dom.lblFlashStatus) this.dom.lblFlashStatus.textContent = getTranslation('flash_status_failed');
+        console.error("Flash failure:", err);
+      }).finally(() => {
+        this.setFlasherControlsDisabled(false);
+      });
+    });
+
+    this.dom.selectFlashFwVersion?.addEventListener('change', () => this.updateFlashTexts());
+  }
+
+  /**
+   * Restaure les donnees de la session precedente stockees dans IndexedDB et LocalStorage.
+   * @private
+   */
+  async restorePersistedSession() {
+    try {
+      // 1. Charger l'historique des trames
+      const savedFrames = await loadFrames();
+      if (savedFrames && savedFrames.length > 0) {
+        this.allReceivedFrames = savedFrames;
+        this.packetIndex = Math.max(...savedFrames.map(f => f.index)) || 0;
+        
+        // Remplir l'historique RSSI/SNR pour les graphes
+        const recentFrames = savedFrames.slice(-this.maxChartPoints);
+        recentFrames.forEach(f => {
+          this.rssiHistory.push({ value: f.rssi, time: f.timestamp });
+          this.snrHistory.push({ value: f.snr, time: f.timestamp });
+        });
+        
+        const lastFrame = savedFrames[savedFrames.length - 1];
+        if (this.dom.statRssi) this.dom.statRssi.textContent = `${lastFrame.rssi} dBm`;
+        if (this.dom.statSnr) this.dom.statSnr.textContent = `${lastFrame.snr} dB`;
+        if (this.dom.statCount) {
+          this.dom.statCount.textContent = `${this.packetIndex} / ${this.crcErrorsCount}`;
         }
         
-        const band = this.dom.selectBand ? this.dom.selectBand.value : '868';
-        const fwVersion = this.dom.selectFlashFwVersion ? this.dom.selectFlashFwVersion.value : 'latest';
-        const verTag = fwVersion === 'latest' ? 'v1.6.2' : fwVersion;
-        const binUrl = `binaries/firmware_bluetooth_${band}_${verTag}.bin`;
+        // Dessiner les graphiques
+        this.drawSignalCharts();
         
-        this.setFlasherControlsDisabled(true);
-        if (this.dom.flashProgressContainer) this.dom.flashProgressContainer.classList.remove('hidden');
-        if (this.dom.lblFlashStatus) this.dom.lblFlashStatus.textContent = getTranslation('flash_status_connecting');
-        if (this.dom.lblFlashPercent) this.dom.lblFlashPercent.textContent = "0%";
-        if (this.dom.flashProgressBar) this.dom.flashProgressBar.style.width = "0%";
+        // Remplir la table de télémétrie
+        if (this.dom.tableTelemetryBody) {
+          this.dom.tableTelemetryBody.innerHTML = '';
+          if (this.dom.rowEmpty) this.dom.rowEmpty.style.display = 'none';
+          
+          const framesToShow = this.allReceivedFrames.slice(-50).reverse();
+          framesToShow.forEach(f => {
+            const tr = document.createElement('tr');
+            tr.innerHTML = `
+              <td>${f.index}</td>
+              <td>${f.timestamp}</td>
+              <td><span class="badge connected">${f.tracker}</span></td>
+              <td>${f.apid}</td>
+              <td>${f.size} ${getTranslation('unit_bytes')}</td>
+              <td>${f.rssi} dBm</td>
+              <td>${f.snr} dB</td>
+              <td><span style="font-family: var(--font-mono); color: var(--color-success); font-weight: 600; white-space: nowrap;">✔ ${f.crcHex}</span></td>
+              <td style="font-family: var(--font-mono); color: var(--color-cyan); word-break: break-all;">${f.payload}</td>
+            `;
+            this.dom.tableTelemetryBody.appendChild(tr);
+          });
+        }
+      }
+      
+      // 2. Charger les trackers actifs
+      const savedTrackers = loadTrackersState();
+      if (savedTrackers && Object.keys(savedTrackers).length > 0) {
+        this.activeTrackers = savedTrackers;
+        this.updateTrackersTable();
+      }
+      
+      // 3. Charger la trajectoire WASP
+      const savedWaspData = loadWaspTrackersData();
+      const savedActiveWasp = loadActiveWaspTracker();
+      
+      if (savedWaspData && Object.keys(savedWaspData).length > 0) {
+        this.waspTrackersData = savedWaspData;
+        this.activeWaspTrackerName = savedActiveWasp;
         
-        this.serial.flashFirmware(
-          binUrl,
-          (percent, statusKey, extra) => {
-            if (this.dom.lblFlashPercent) this.dom.lblFlashPercent.textContent = `${percent}%`;
-            if (this.dom.flashProgressBar) this.dom.flashProgressBar.style.width = `${percent}%`;
-            if (this.dom.lblFlashStatus) {
-              this.dom.lblFlashStatus.textContent = extra ? getTranslation(statusKey, { chip: extra }) : getTranslation(statusKey);
+        if (this.activeWaspTrackerName) {
+          this.updateWaspCockpit(this.activeWaspTrackerName);
+        }
+        
+        if (this.dom.selectWaspTracker) {
+          this.dom.selectWaspTracker.innerHTML = '';
+          Object.keys(this.waspTrackersData).forEach(name => {
+            const opt = document.createElement('option');
+            opt.value = name;
+            opt.textContent = `${name} (APID: ${this.waspTrackersData[name].apid})`;
+            this.dom.selectWaspTracker.appendChild(opt);
+          });
+          if (this.activeWaspTrackerName) {
+            this.dom.selectWaspTracker.value = this.activeWaspTrackerName;
+          }
+        }
+        
+        // Si le décodeur WASP est déjà coché, placer les marqueurs
+        if (this.dom.chkWaspDecoding?.checked) {
+          this.map?.init();
+          Object.keys(this.waspTrackersData).forEach(name => {
+            const data = this.waspTrackersData[name];
+            if (data.lat !== 0 && data.lon !== 0) {
+              this.map.updateTrackerPosition(name, data, this.activeWaspTrackerName);
             }
-          },
-          (logMsg) => this.logToTerminal(logMsg, 'sys-out')
-        ).catch(err => {
-          if (this.dom.lblFlashStatus) this.dom.lblFlashStatus.textContent = getTranslation('flash_status_failed');
-          console.error("Flash failure:", err);
-        }).finally(() => {
-          this.setFlasherControlsDisabled(false);
-        });
-      });
-    }
-
-    if (this.dom.selectFlashFwVersion) {
-      this.dom.selectFlashFwVersion.addEventListener('change', () => this.updateFlashTexts());
+          });
+        }
+      }
+    } catch (err) {
+      console.error("Erreur de restauration de la session persistee :", err);
     }
   }
 
@@ -438,16 +527,18 @@ class NectarApp {
    * Loggue une ligne dans la console terminal de l'IHM.
    */
   logToTerminal(message, type = 'cmd-out') {
-    if (!this.dom.terminalLogs) return;
+    const logsEl = this.dom.terminalLogs;
+    if (!logsEl) return;
+    
     const div = document.createElement('div');
     div.className = type;
     div.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-    this.dom.terminalLogs.appendChild(div);
+    logsEl.appendChild(div);
     
-    while (this.dom.terminalLogs.children.length > 500) {
-      this.dom.terminalLogs.removeChild(this.dom.terminalLogs.firstChild);
+    while (logsEl.children.length > 500) {
+      logsEl.removeChild(logsEl.firstChild);
     }
-    this.dom.terminalLogs.scrollTop = this.dom.terminalLogs.scrollHeight;
+    logsEl.scrollTop = logsEl.scrollHeight;
   }
 
   /**
@@ -455,7 +546,6 @@ class NectarApp {
    */
   updateConnectionUI(connected, name = '') {
     this.currentPortName = name;
-    const currentLang = localStorage.getItem('nectar_lang') || 'fr';
     
     if (this.dom.connBadge) {
       this.dom.connBadge.textContent = connected ? getTranslation('badge_connected') : getTranslation('badge_disconnected');
@@ -524,6 +614,7 @@ class NectarApp {
     
     if (statusChanged) {
       this.updateTrackersTable();
+      saveTrackersState(this.activeTrackers);
     }
   }
 
@@ -541,8 +632,8 @@ class NectarApp {
     const timestamp = (epoch > 100000000) ? new Date(epoch * 1000).toLocaleTimeString() : new Date().toLocaleTimeString();
     const crcHex = '0x' + decoded.crc.received.toString(16).toUpperCase().padStart(4, '0');
 
-    // 1. Ajouter à l'historique complet (export CSV)
-    this.allReceivedFrames.push({
+    // 1. Ajouter à l'historique complet
+    const frameObj = {
       index: this.packetIndex,
       timestamp,
       tracker: trackerName,
@@ -552,10 +643,12 @@ class NectarApp {
       rssi,
       snr,
       crcHex
-    });
+    };
+    this.allReceivedFrames.push(frameObj);
     if (this.allReceivedFrames.length > 5000) {
       this.allReceivedFrames.shift();
     }
+    saveFrame(frameObj); // Sauvegarde persistante IndexedDB
 
     // 2. Statistiques en direct et Graphiques
     if (this.dom.statRssi) this.dom.statRssi.textContent = `${rssi} dBm`;
@@ -602,9 +695,11 @@ class NectarApp {
     this.activeTrackers[trackerName].lastPayloadHex = bytesToHex(payload);
     this.activeTrackers[trackerName].lastRssi = rssi;
     this.activeTrackers[trackerName].lastSnr = snr;
+    
+    saveTrackersState(this.activeTrackers); // Sauvegarde LocalStorage
 
     // 4. Décodage WASP conditionnel (29 octets LoRa)
-    if (this.dom.chkWaspDecoding && this.dom.chkWaspDecoding.checked && payloadSize === 29) {
+    if (this.dom.chkWaspDecoding?.checked && payloadSize === 29) {
       try {
         const waspData = decodeWaspPayload(payload);
         const isNewWasp = !this.waspTrackersData[trackerName];
@@ -623,7 +718,7 @@ class NectarApp {
           });
 
           if (oldestTrackerName) {
-            this.map.removeTracker(oldestTrackerName);
+            this.map?.removeTracker(oldestTrackerName);
             delete this.waspTrackersData[oldestTrackerName];
             
             if (this.dom.selectWaspTracker) {
@@ -653,6 +748,8 @@ class NectarApp {
           rssi,
           snr
         };
+        
+        saveWaspTrackersData(this.waspTrackersData); // Sauvegarde LocalStorage
 
         // Remplissage du sélecteur IHM de trackers
         if (this.dom.selectWaspTracker) {
@@ -668,13 +765,14 @@ class NectarApp {
             if (!this.activeWaspTrackerName) {
               this.activeWaspTrackerName = trackerName;
               this.dom.selectWaspTracker.value = trackerName;
+              saveActiveWaspTracker(trackerName);
             }
           }
         }
 
         // Trace sur la carte Leaflet
         if (waspData.lat !== 0 && waspData.lon !== 0 && Math.abs(waspData.lat) <= 90 && Math.abs(waspData.lon) <= 180) {
-          this.map.updateTrackerPosition(trackerName, {
+          this.map?.updateTrackerPosition(trackerName, {
             lat: waspData.lat,
             lon: waspData.lon,
             alt: waspData.alt,
@@ -839,20 +937,20 @@ class NectarApp {
     if (!row) {
       row = document.createElement('tr');
       row.id = rowId;
-      row.style.borderBottom = '1px solid rgba(255, 255, 255, 0.05)';
+      row.className = 'sd-file-row';
       
       const tdName = document.createElement('td');
+      tdName.className = 'sd-file-cell';
       tdName.textContent = filename;
-      tdName.style.padding = '0.5rem';
       row.appendChild(tdName);
       
       const tdSize = document.createElement('td');
+      tdSize.className = 'sd-file-cell';
       tdSize.textContent = (size / 1024).toFixed(2) + ' KB';
-      tdSize.style.padding = '0.5rem';
       row.appendChild(tdSize);
       
       const tdAction = document.createElement('td');
-      tdAction.style.padding = '0.5rem';
+      tdAction.className = 'sd-file-cell';
       const btn = document.createElement('button');
       btn.className = 'btn primary small';
       btn.textContent = getTranslation('sd_download_btn');
@@ -948,54 +1046,70 @@ class NectarApp {
   }
 
   /**
-   * Rplit le tableau de télémétrie.
+   * Remplit dynamiquement le tableau de télémétrie en insérant chirurgicalement le dernier élément reçu.
    */
   renderTelemetryTable() {
-    if (!this.dom.tableTelemetryBody) return;
-    this.dom.tableTelemetryBody.innerHTML = '';
+    const tableBody = this.dom.tableTelemetryBody;
+    if (!tableBody) return;
     
+    // S'il n'y a pas de trame en mémoire, afficher le message vide
     if (this.allReceivedFrames.length === 0) {
+      tableBody.innerHTML = '';
       if (this.dom.rowEmpty) {
         this.dom.rowEmpty.style.display = 'table-row';
-        this.dom.tableTelemetryBody.appendChild(this.dom.rowEmpty);
+        tableBody.appendChild(this.dom.rowEmpty);
       }
       return;
     }
     
+    // Cacher le message vide
     if (this.dom.rowEmpty) {
       this.dom.rowEmpty.style.display = 'none';
     }
     
-    const framesToShow = this.allReceivedFrames.slice(-50).reverse();
-    framesToShow.forEach(f => {
-      const tr = document.createElement('tr');
-      tr.innerHTML = `
-        <td>${f.index}</td>
-        <td>${f.timestamp}</td>
-        <td><span class="badge connected">${f.tracker}</span></td>
-        <td>${f.apid}</td>
-        <td>${f.size} ${getTranslation('unit_bytes')}</td>
-        <td>${f.rssi} dBm</td>
-        <td>${f.snr} dB</td>
-        <td><span style="font-family: var(--font-mono); color: var(--color-success); font-weight: 600; white-space: nowrap;">✔ ${f.crcHex}</span></td>
-        <td style="font-family: var(--font-mono); color: var(--color-cyan); word-break: break-all;">${f.payload}</td>
-      `;
-      this.dom.tableTelemetryBody.appendChild(tr);
-    });
+    // Récupérer la toute dernière trame
+    const f = this.allReceivedFrames[this.allReceivedFrames.length - 1];
+    
+    // Si c'est le tout premier élément ajouté, s'assurer de vider le tableau
+    if (this.allReceivedFrames.length === 1) {
+      tableBody.innerHTML = '';
+    }
+    
+    // Création de l'élément tr
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${f.index}</td>
+      <td>${f.timestamp}</td>
+      <td><span class="badge connected">${f.tracker}</span></td>
+      <td>${f.apid}</td>
+      <td>${f.size} ${getTranslation('unit_bytes')}</td>
+      <td>${f.rssi} dBm</td>
+      <td>${f.snr} dB</td>
+      <td><span style="font-family: var(--font-mono); color: var(--color-success); font-weight: 600; white-space: nowrap;">✔ ${f.crcHex}</span></td>
+      <td style="font-family: var(--font-mono); color: var(--color-cyan); word-break: break-all;">${f.payload}</td>
+    `;
+    
+    // Ajout chirurgical au début du tableau (prepend)
+    tableBody.prepend(tr);
+    
+    // Limite de 50 lignes affichées
+    while (tableBody.children.length > 50) {
+      tableBody.lastElementChild.remove();
+    }
   }
 
   /**
-   * Fplit le tableau des trackers actifs.
+   * Remplit le tableau des trackers actifs par mise à jour chirurgicale individuelle.
    */
   updateTrackersTable() {
     const tableBody = document.querySelector('#table-trackers tbody');
     const rowEmpty = document.getElementById('row-empty-trackers');
     if (!tableBody) return;
     
-    tableBody.innerHTML = '';
     const keys = Object.keys(this.activeTrackers);
     
     if (keys.length === 0) {
+      tableBody.innerHTML = '';
       if (rowEmpty) {
         rowEmpty.style.display = 'table-row';
         tableBody.appendChild(rowEmpty);
@@ -1009,23 +1123,33 @@ class NectarApp {
     
     keys.forEach(key => {
       const tracker = this.activeTrackers[key];
-      const tr = document.createElement('tr');
-      tr.style.borderBottom = '1px solid rgba(255, 255, 255, 0.05)';
+      const rowId = `tracker-row-${tracker.name}`;
+      let tr = document.getElementById(rowId);
       
       const lastSeenTime = new Date(tracker.lastSeen).toLocaleTimeString();
       const statusClass = tracker.isLost ? 'badge disconnected' : 'badge connected';
       const statusText = tracker.isLost ? getTranslation('status_lost') : getTranslation('status_active');
       
-      tr.innerHTML = `
-        <td style="padding: 0.75rem;"><span class="badge connected">${tracker.name}</span></td>
-        <td style="padding: 0.75rem;">${getTranslation(tracker.typeLabelKey)}</td>
-        <td style="padding: 0.75rem;">${tracker.lastApid}</td>
-        <td style="padding: 0.75rem; font-weight: 600;">${tracker.packetCount}</td>
-        <td style="padding: 0.75rem;">${lastSeenTime}</td>
-        <td style="padding: 0.75rem;"><span class="${statusClass}">${statusText}</span></td>
-        <td style="padding: 0.75rem; font-family: var(--font-mono); font-weight: bold; color: var(--color-cyan); white-space: nowrap;">${tracker.lastRssi} dBm / ${tracker.lastSnr} dB</td>
+      const rowHtml = `
+        <td class="tracker-cell"><span class="badge connected">${tracker.name}</span></td>
+        <td class="tracker-cell">${getTranslation(tracker.typeLabelKey)}</td>
+        <td class="tracker-cell">${tracker.lastApid}</td>
+        <td class="tracker-cell" style="font-weight: 600;">${tracker.packetCount}</td>
+        <td class="tracker-cell">${lastSeenTime}</td>
+        <td class="tracker-cell"><span class="${statusClass}">${statusText}</span></td>
+        <td class="tracker-cell tracker-cell-signal">${tracker.lastRssi} dBm / ${tracker.lastSnr} dB</td>
       `;
-      tableBody.appendChild(tr);
+      
+      if (!tr) {
+        tr = document.createElement('tr');
+        tr.id = rowId;
+        tr.className = 'tracker-row';
+        tr.innerHTML = rowHtml;
+        tableBody.appendChild(tr);
+      } else {
+        tr.className = 'tracker-row';
+        tr.innerHTML = rowHtml;
+      }
     });
   }
 
