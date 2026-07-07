@@ -47,7 +47,7 @@ export class NectarSerial extends EventTarget {
       // Démarrage de la boucle de lecture
       this.readLoopPromise = this.readSerialLoop(fwVersionFormat);
     } catch (err) {
-      this.log(`Erreur de connexion : ${err.message}`, 'sys-out');
+      this.log(`Erreur de connexion : ${err.message}`, 'sys-err');
       await this.disconnect();
       throw err;
     }
@@ -116,7 +116,7 @@ export class NectarSerial extends EventTarget {
             }
           }
         } catch (err) {
-          this.log(`Erreur de lecture : ${err.message}`, 'sys-out');
+          this.log(`Erreur de lecture : ${err.message}`, 'sys-err');
           break;
         } finally {
           if (this.reader) {
@@ -179,7 +179,7 @@ export class NectarSerial extends EventTarget {
           this.dispatchEvent(new CustomEvent('packet', { detail: decoded }));
         } catch (decErr) {
           console.error("Erreur de décodage:", decErr);
-          this.log(`[ERREUR DECODAGE] Trame rejetée : ${decErr.message}`, 'sys-out');
+          this.log(`[ERREUR DECODAGE] Trame rejetée : ${decErr.message}`, 'sys-err');
           if (decErr.message && decErr.message.includes("CRC check failed")) {
             this.dispatchEvent(new CustomEvent('crc-error'));
           }
@@ -242,7 +242,7 @@ export class NectarSerial extends EventTarget {
         
         this.dispatchEvent(new CustomEvent('line', { detail: text })); // Echo local dans la console
       } catch (err) {
-        this.log(`Erreur d'envoi : ${err.message}`, 'sys-out');
+        this.log(`Erreur d'envoi : ${err.message}`, 'sys-err');
         console.error("Erreur sendSerialText:", err);
       } finally {
         if (writer) {

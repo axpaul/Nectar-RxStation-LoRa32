@@ -601,6 +601,11 @@ td {
   opacity: 0.85;
 }
 
+.terminal-view .sys-err {
+  color: var(--color-danger);
+  font-weight: 500;
+}
+
 .terminal-input-row {
   display: flex;
   align-items: center;

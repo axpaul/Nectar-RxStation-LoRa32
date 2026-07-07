@@ -706,7 +706,7 @@ class NectarApp {
     // 4. Décodage WASP conditionnel (29 octets LoRa et type mission WASP)
     if (this.dom.chkWaspDecoding?.checked && ssidType === 1) {
       if (payloadSize !== 29) {
-        this.logToTerminal(`⚠️ [WASP] APID ${apid} (${trackerName}) : Taille de trame incorrecte (${payloadSize} octets au lieu de 29)`, "sys-out");
+        this.logToTerminal(`⚠️ [WASP] APID ${apid} (${trackerName}) : Taille de trame incorrecte (${payloadSize} octets au lieu de 29)`, "sys-err");
       } else {
         try {
           const waspData = decodeWaspPayload(payload);
@@ -798,7 +798,7 @@ class NectarApp {
           }
         } catch (e) {
           console.error("WASP payload decode error:", e);
-          this.logToTerminal(`⚠️ [WASP] APID ${apid} (${trackerName}) : Échec décodage : ${e.message}`, "sys-out");
+          this.logToTerminal(`⚠️ [WASP] APID ${apid} (${trackerName}) : Échec décodage : ${e.message}`, "sys-err");
         }
       }
     }
