@@ -93,12 +93,31 @@ classDiagram
 | **Localisation** | `translate.js`| Chargement des dictionnaires FR/EN, scannage et injection dans le DOM, propagation de l'événement custom `lang-changed`. | `updateLanguage()`, `getTranslation()` |
 | **Cartographie** | `map.js` | Encapsulation de la bibliothèque Leaflet, placement des marqueurs, animation de pulsation des émetteurs et dessin des lignes de trajectoire. | `init()`, `updateTrackerPosition()`, `clear()` |
 
----
+## ⚙️ Description Détaillée des Fonctions Clés
 
-## ⚡ Résolution du Bug d'Arrêt de Flux après la Première Trame
-### Le Problème Réel Constaté
-Sur les versions récentes du micrologiciel (à partir de la v1.6.2), la liaison série USB a cessé d'envoyer le caractère de retour à la ligne `\n` (`0x0A`) en fin de trame binaire. Le décodeur JavaScript d'origine attendait un décalage de `+1` octet pour marquer la fin de la trame. Dès la réception de la deuxième trame, le buffer série subissait un décalage de 1 octet, ce qui masquait le premier octet magique `0xEB`, entraînant la perte et la désynchronisation immédiate et définitive de la liaison.
+### 1. `parseRxBuffer(fwVersionFormat)` — `js/serial.js`
+Cette méthode est le coeur du traitement de flux d'entrée. Elle tourne en continu et analyse le tableau d'octets `rxBuffer` :
+*   **Identification** : Si l'octet à l'index `0` est `0xEB` (Magic Byte), elle considère qu'il s'agit d'une trame binaire.
+*   **Format v1.6.2 (`gs_flag`)** : Elle décode le flag du GS (index 3) et la taille du payload (index 4) pour calculer dynamiquement la taille totale de la trame binaire sans attendre de caractère de fin de ligne `\n`.
+*   **Format v1.3.1 (Historique)** : Elle extrait la taille du payload à l'index 3 et inclut le retour chariot `\n` (`+1` octet) dans la taille totale attendue.
+*   **Logs de texte** : Si le premier octet n'est pas `0xEB`, elle recherche un caractère de saut de ligne (`\r` ou `\n`) pour découper une ligne de log textuelle brute (provenant des retours de commandes AT, du démarrage de la carte, ou des dumps de la carte SD).
 
-### Le Correctif Appliqué
-1. **Parser Binaire Conforme (v1.6.2)** : Le parser a été corrigé dans `serial.js` pour lire la taille exacte de la trame (`totalFrameSize`) sans attendre d'octet supplémentaire de fin de ligne. Les trames suivantes sont désormais alignées et décodées de manière continue sans aucune perte.
-2. **Isolation Mémoire WASP** : Pour éviter toute instabilité de lecture dans la structure binaire, la charge utile WASP de 29 octets est isolée dans un `ArrayBuffer` et lue par un `DataView` indépendant.
+### 2. `decodeNectarFrame(frame, fwVersion)` — `js/decoder.js`
+Cette fonction pure effectue les tâches de validation :
+*   **CRC16-CCITT** : Elle isole les octets de données, calcule le CRC16 et le compare aux deux derniers octets de la trame. En cas d'erreur de CRC, elle lève une exception et la trame est rejetée.
+*   **Décodage des identifiants** : Elle extrait l'ID de la mission (2 octets), qui contient le SSID (type de mission : fusée, mini-fusée ou ballon) et l'APID. Elle renvoie un objet structuré contenant le nom lisible du tracker (ex: `FX3`) et ses métriques radio.
+
+### 3. `decodeWaspPayload(payload)` — `js/decoder.js`
+Destinée au décodage de la charge utile de 29 octets du tracker WASP :
+*   Elle copie les octets bruts dans un `ArrayBuffer` et instancie un `DataView` pour lire de manière structurée les types binaires : `Float32` pour les coordonnées GPS (latitude, longitude), l'altitude et la vitesse, `Uint32` pour le temps UTC, et des entiers signés/non signés pour la batterie et la température.
+
+### 4. `updateTrackerPosition(trackerName, data, activeTrackerName)` — `js/map.js`
+Gère la couche cartographique Leaflet :
+*   Elle met à jour ou crée le marqueur géographique sur la carte.
+*   Elle maintient et allonge un tracé (polyline) représentant le chemin parcouru par le tracker.
+*   Si le tracker mis à jour est celui sélectionné en cockpit (`trackerName === activeTrackerName`), elle applique une classe CSS de pulsation verte sur l'icône Leaflet pour l'identifier visuellement.
+
+### 5. `updateLanguage(lang)` — `js/translate.js`
+Assure la localisation de l'interface :
+*   Elle parcourt l'ensemble des éléments du DOM disposant d'attributs `data-i18n`, `data-i18n-placeholder` ou `data-i18n-title` pour injecter la traduction correspondante à la langue sélectionnée.
+*   Elle émet l'événement `window.dispatchEvent(new CustomEvent('lang-changed'))` afin de forcer l'orchestrateur `NectarApp` à recalculer les textes dynamiques (tels que les indicateurs du cockpit, les graphiques ou le tableau des trackers).
