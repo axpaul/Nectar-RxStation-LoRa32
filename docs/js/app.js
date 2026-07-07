@@ -1023,8 +1023,7 @@ class NectarApp {
         <td style="padding: 0.75rem; font-weight: 600;">${tracker.packetCount}</td>
         <td style="padding: 0.75rem;">${lastSeenTime}</td>
         <td style="padding: 0.75rem;"><span class="${statusClass}">${statusText}</span></td>
-        <td style="padding: 0.75rem; font-family: var(--font-mono); color: var(--color-cyan); font-size: 0.85rem; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${tracker.lastPayloadHex}">${tracker.lastPayloadHex}</td>
-        <td style="padding: 0.75rem; font-weight: 600; white-space: nowrap;">${tracker.lastRssi} / ${tracker.lastSnr}</td>
+        <td style="padding: 0.75rem; font-family: var(--font-mono); font-weight: bold; color: var(--color-cyan); white-space: nowrap;">${tracker.lastRssi} dBm / ${tracker.lastSnr} dB</td>
       `;
       tableBody.appendChild(tr);
     });
@@ -1093,129 +1092,69 @@ class NectarApp {
    * Dessine les graphiques SVG RSSI et SNR en direct.
    */
   drawSignalCharts() {
-    this.drawChart('chart-rssi-svg', this.rssiHistory, -130, -10, '#06b6d4', 'RSSI');
-    this.drawChart('chart-snr-svg', this.snrHistory, -20, 20, '#a855f7', 'SNR');
+    this.drawSingleChart('rssi-chart-line', 'rssi-chart-fill', this.rssiHistory, -120, 0);
+    this.drawSingleChart('snr-chart-line', 'snr-chart-fill', this.snrHistory, -20, 20);
+    
+    // Mettre à jour les indicateurs de temps
+    const lblRssiTime = document.getElementById('chart-rssi-time');
+    const lblSnrTime = document.getElementById('chart-snr-time');
+    if (this.rssiHistory.length > 0 && lblRssiTime) {
+      lblRssiTime.textContent = this.rssiHistory[this.rssiHistory.length - 1].time;
+    }
+    if (this.snrHistory.length > 0 && lblSnrTime) {
+      lblSnrTime.textContent = this.snrHistory[this.snrHistory.length - 1].time;
+    }
   }
 
   /**
-   * Dessine le graphique de débit SVG.
-   */
-  updateThroughputChart() {
-    const dataPoints = this.throughputHistory.map((val, idx) => ({ value: val, time: idx.toString() }));
-    const maxVal = Math.max(100, ...this.throughputHistory) * 1.1;
-    this.drawChart('chart-throughput-svg', dataPoints, 0, maxVal, '#10b981', 'Throughput');
-  }
-
-  /**
-   * Dessine un graphique linéaire en SVG pur pour un conteneur donné.
+   * Dessine un graphique linéaire en SVG pour une ligne et un fond donnés.
    * @private
    */
-  drawChart(svgId, history, minVal, maxVal, color, label) {
-    const svg = document.getElementById(svgId);
-    if (!svg) return;
+  drawSingleChart(lineId, fillId, history, minVal, maxVal) {
+    const chartLine = document.getElementById(lineId);
+    const chartFill = document.getElementById(fillId);
+    if (!chartLine || !chartFill) return;
     
-    svg.innerHTML = '';
-    const width = svg.clientWidth || 300;
-    const height = svg.clientHeight || 120;
-    const padding = 15;
+    const width = 300;
+    const height = 100;
+    const pointsCount = history.length;
     
-    if (history.length < 2) {
-      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('x', (width / 2).toString());
-      text.setAttribute('y', (height / 2).toString());
-      text.setAttribute('text-anchor', 'middle');
-      text.setAttribute('fill', 'rgba(255,255,255,0.3)');
-      text.setAttribute('font-size', '12px');
-      text.textContent = 'En attente de signal...';
-      svg.appendChild(text);
+    if (pointsCount === 0) {
+      chartLine.setAttribute('d', '');
+      chartFill.setAttribute('d', 'M 0 100 L 300 100 Z');
       return;
     }
     
-    const getX = (index) => padding + (index / (this.maxChartPoints - 1)) * (width - 2 * padding);
-    const getY = (val) => {
-      const clamped = Math.max(minVal, Math.min(maxVal, val));
-      const ratio = (clamped - minVal) / (maxVal - minVal);
-      return height - padding - ratio * (height - 2 * padding);
-    };
-
-    // Dessin de la grille horizontale de repères
-    const gridLines = 3;
-    for (let i = 0; i <= gridLines; i++) {
-      const ratio = i / gridLines;
-      const yVal = minVal + ratio * (maxVal - minVal);
-      const yPos = getY(yVal);
+    let dLine = '';
+    let dFill = 'M 0 100';
+    
+    for (let i = 0; i < pointsCount; i++) {
+      const val = history[i].value;
+      const clampedVal = Math.max(minVal, Math.min(maxVal, val));
+      const ratio = (clampedVal - minVal) / (maxVal - minVal);
+      const x = (i / (this.maxChartPoints - 1)) * width;
+      const y = height - (ratio * height);
       
-      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
-      line.setAttribute('x1', padding.toString());
-      line.setAttribute('y1', yPos.toString());
-      line.setAttribute('x2', (width - padding).toString());
-      line.setAttribute('y2', yPos.toString());
-      line.setAttribute('stroke', 'rgba(255,255,255,0.05)');
-      line.setAttribute('stroke-dasharray', '2,2');
-      svg.appendChild(line);
-      
-      const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-      text.setAttribute('x', (padding + 2).toString());
-      text.setAttribute('y', (yPos - 2).toString());
-      text.setAttribute('fill', 'rgba(255,255,255,0.2)');
-      text.setAttribute('font-size', '8px');
-      text.textContent = Math.round(yVal).toString();
-      svg.appendChild(text);
+      if (i === 0) {
+        dLine += `M ${x} ${y}`;
+      } else {
+        dLine += ` L ${x} ${y}`;
+      }
+      dFill += ` L ${x} ${y}`;
     }
     
-    // Construction de la ligne de tracé
-    let points = [];
-    const startIndex = this.maxChartPoints - history.length;
+    const lastX = ((pointsCount - 1) / (this.maxChartPoints - 1)) * width;
+    dFill += ` L ${lastX} 100 Z`;
     
-    history.forEach((pt, idx) => {
-      const x = getX(startIndex + idx);
-      const y = getY(pt.value);
-      points.push(`${x},${y}`);
-    });
-    
-    const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-    path.setAttribute('d', `M ${points.join(' L ')}`);
-    path.setAttribute('fill', 'none');
-    path.setAttribute('stroke', color);
-    path.setAttribute('stroke-width', '2');
-    path.setAttribute('stroke-linecap', 'round');
-    path.setAttribute('stroke-linejoin', 'round');
-    svg.appendChild(path);
-    
-    // Dégradé de fond sous la ligne
-    const areaPoints = [
-      `${getX(startIndex)},${height - padding}`,
-      ...points,
-      `${getX(this.maxChartPoints - 1)},${height - padding}`
-    ];
-    const area = document.createElementNS('http://www.w3.org/2000/svg', 'polygon');
-    area.setAttribute('points', areaPoints.join(' '));
-    area.setAttribute('fill', `url(#grad-${svgId})`);
-    
-    // Injection du gradient linéaire
-    const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
-    const grad = document.createElementNS('http://www.w3.org/2000/svg', 'linearGradient');
-    grad.setAttribute('id', `grad-${svgId}`);
-    grad.setAttribute('x1', '0%');
-    grad.setAttribute('y1', '0%');
-    grad.setAttribute('x2', '0%');
-    grad.setAttribute('y2', '100%');
-    
-    const stop1 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-    stop1.setAttribute('offset', '0%');
-    stop1.setAttribute('stop-color', color);
-    stop1.setAttribute('stop-opacity', '0.15');
-    grad.appendChild(stop1);
-    
-    const stop2 = document.createElementNS('http://www.w3.org/2000/svg', 'stop');
-    stop2.setAttribute('offset', '100%');
-    stop2.setAttribute('stop-color', color);
-    stop2.setAttribute('stop-opacity', '0.0');
-    grad.appendChild(stop2);
-    
-    defs.appendChild(grad);
-    svg.appendChild(defs);
-    svg.appendChild(area);
+    chartLine.setAttribute('d', dLine);
+    chartFill.setAttribute('d', dFill);
+  }
+
+  /**
+   * Met à jour le débit (les calculs de texte sont faits dans calculateThroughput).
+   */
+  updateThroughputChart() {
+    // Pas de rendu de courbe requis pour le débit.
   }
 }
 
